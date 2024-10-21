@@ -7,6 +7,9 @@ library(biotools)
 library(vegan)
 library(factoextra)
 library(MVN)  # Pacote para testes de normalidade multivariada
+library(tuneR)
+library(seewave)
+
 
 # ----------------------------------------------------------------------------
 
@@ -179,6 +182,59 @@ realizar_pca_vogal <- function(df, vogal) {
 }
 
 # ----------------------------------------------------------------------------
+
+# Função para concatenar segmentos de áudio com base no DataFrame, áudio e filtro de label
+concatenar_audio_com_filtro <- function(textgrid_palavra_df, audio, filtro_label) {
+  
+  # Filtrar o dataframe com base no texto da coluna 'label'
+  textgrid_palavra_df_filtrado <- textgrid_palavra_df %>%
+    filter(label == filtro_label)
+  
+  # Criar uma função para extrair os segmentos de áudio
+  extrair_segmento_audio <- function(inicio, fim, audio) {
+    # Converter o tempo de início e fim em amostras
+    taxa_amostragem <- audio@samp.rate
+    inicio_amostra <- as.integer(inicio * taxa_amostragem)
+    fim_amostra <- as.integer(fim * taxa_amostragem)
+    
+    # Extrair o segmento do arquivo de áudio
+    segmento <- extractWave(audio, from = inicio_amostra, to = fim_amostra, xunit = "samples")
+    
+    # Normalizar para 16-bit PCM, independentemente do formato original
+    segmento <- normalize(segmento, unit = "16")
+    
+    return(segmento)
+  }
+  
+  # Inicializar o áudio concatenado como 16 bits PCM com as mesmas características do áudio original
+  if (audio@stereo) {
+    # Se o áudio é estéreo
+    audio_concatenado <- Wave(left = integer(0), right = integer(0), 
+                              samp.rate = audio@samp.rate, bit = 16)
+  } else {
+    # Se o áudio é mono
+    audio_concatenado <- Wave(left = integer(0), 
+                              samp.rate = audio@samp.rate, bit = 16)
+  }
+  
+  # Loop para concatenar os segmentos de áudio
+  for (i in 1:nrow(textgrid_palavra_df_filtrado)) {
+    # Extrair início e fim
+    inicio <- textgrid_palavra_df_filtrado[i, "t1"]
+    fim <- textgrid_palavra_df_filtrado[i, "t2"]
+    
+    # Extrair o segmento correspondente
+    segmento <- extrair_segmento_audio(inicio, fim, audio)
+    
+    # Concatenar ao áudio final
+    audio_concatenado <- bind(audio_concatenado, segmento)
+  }
+  
+  # Retornar o áudio concatenado
+  return(audio_concatenado)
+}
+
+# ----------------------------------------------------------------------------
 # Principal
 # ----------------------------------------------------------------------------
 
@@ -346,9 +402,10 @@ ggplot() +
   geom_point(data = df_medias, aes(x = f2_media, y = f1_media, color = grupo, shape = vogal), size = 4) +
   
   # Adicionar as linhas conectando os pontos dentro de cada grupo
-  geom_line(data = df_medias, aes(x = f2_media, y = f1_media, color = grupo, group = grupo, linetype = grupo), size = 1) +
+  # geom_line(data = df_medias, aes(x = f2_media, y = f1_media, color = grupo, group = grupo, linetype = grupo), size = 1) +
   
-  # Inverter o eixo Y
+  # Inverter os eixos
+  scale_x_reverse() +
   scale_y_reverse() +
   
   # Adicionar rótulos e legendas
@@ -369,3 +426,51 @@ ggplot() +
     legend.position = "right"  # Colocar a legenda à direita
   )
 
+# Boxplot para F1 e F2 lado a lado para cada vogal
+ggplot(df_combinado, aes(x = vogal, y = f1, fill = grupo)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F1 com grupos lado a lado
+  labs(title = "Boxplots de F1 por vogal e grupo", x = "Vogal", y = "F1", fill = "Grupo") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+
+# Boxplot de F2 com grupos lado a lado para cada vogal
+ggplot(df_combinado, aes(x = vogal, y = f2, fill = grupo)) +
+  geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F2 com grupos lado a lado
+  labs(title = "Boxplots de F2 por vogal e grupo", x = "Vogal", y = "F2", fill = "Grupo") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+
+# Limpar TextGrid e carregar áudio
+textgrid_palavra_df <- as.data.frame(textgrid$Palavra) %>% filter(label != "")
+audio <- readWave("Audio_da_confissão.wav")
+
+# Chamar a função com filtro para a vogal "a"
+audio_concatenado <- concatenar_audio_com_filtro(textgrid_palavra_df, audio, "a")
+
+# Tocar o áudio concatenado (opcional)
+# play(audio_concatenado)
+
+# Salvar o áudio concatenado (opcional)
+writeWave(audio_concatenado, "Audio_concatenado.wav")
+
+# Plotar o oscilograma (forma de onda)
+# oscillo(audio_concatenado, f = audio_concatenado@samp.rate)
+
+
+# Definindo uma paleta de cores com mais níveis de cores
+paleta_cores <- colorRampPalette(c("white", 
+                                   "black"))
+
+# Aumentando a janela de análise (wl) e sobreposição (ovlp) para melhorar a resolução
+spectro(audio_concatenado, 
+        f = audio_concatenado@samp.rate, 
+        flim = c(0, 5), 
+        ovlp = 90,  # Aumentando a sobreposição para 90%
+        wl = 1024,  # Aumentando a janela de análise para mais resolução
+        scale = TRUE, 
+        osc = TRUE, 
+        tlab = "Tempo (s)",
+        flab = "Frequência (kHz)",
+        palette = paleta_cores,
+        collevels = seq(-40, 0, length.out = 100),  # 100 níveis de cor
+        grid = TRUE)  # Adiciona linhas de grade ao gráfico
