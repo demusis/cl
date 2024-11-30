@@ -9,7 +9,13 @@ library(factoextra)
 library(MVN)  # Pacote para testes de normalidade multivariada
 library(tuneR)
 library(seewave)
-
+library(mvoutlier)
+library(openxlsx)
+library(robustbase)
+library(boot)
+library(ggplot2)
+library(ARTool)
+library(healthyR)
 
 # ----------------------------------------------------------------------------
 
@@ -52,29 +58,25 @@ vogal_formantes <- function(vogal, textgrid_palavra_df, formantes_df) {
 
 # ----------------------------------------------------------------------------
 
-filtrar_outliers_mahalanobis <- function(dados_formantes_total, nivel_confianca = 0.975) {
-  print(dados_formantes_total)
+filtrar_outliers <- function(max_formantes, dados_formantes_total, nivel_confianca = 0.975) {
+  # print(dados_formantes_total)
   
   # Selecionar apenas as colunas dos formantes para calcular a distância de Mahalanobis
-  formantes_data <- dados_formantes_total[, grep("^f", names(dados_formantes_total))]
+  # formantes_data <- dados_formantes_total[, grep("^f", names(dados_formantes_total))]
   
-  # Calcular a matriz de covariância dos formantes
-  cov_matrix <- cov(formantes_data, use = "complete.obs")
+  # Selecionar apenas as colunas dos formantes até o limite definido por max_formantes
+  formantes_data <- dados_formantes_total[, grep(paste0("^f[1-", max_formantes, "]$"), 
+                                                 names(dados_formantes_total))]
   
-  # Calcular a distância de Mahalanobis para cada linha do data frame
-  mahalanobis_dist <- mahalanobis(formantes_data, colMeans(formantes_data, na.rm = TRUE), cov_matrix)
+  # Detectar outliers multivariados usando a distância de Mahalanobis robusta
+  result <- aq.plot(formantes_data)
   
-  # Definir o limite para a distância de Mahalanobis com base no nível de confiança e graus de liberdade
-  limite <- qchisq(nivel_confianca, df = num_formantes)
+  # Adicionar a coluna de outliers ao dataframe original
+  dados_formantes_total$outlier <- result$outliers
   
-  # Adicionar uma coluna para indicar se a linha é um outlier
-  dados_formantes_total$outlier <- mahalanobis_dist > limite
+  dados_sem_outliers <- dados_formantes_total[dados_formantes_total$outlier == FALSE, ]
   
-  # Filtrar os dados removendo os outliers
-  dados_sem_outliers_total <- dados_formantes_total %>% filter(outlier == FALSE)
-  
-  # Retornar o dataframe sem outliers
-  return(dados_sem_outliers_total)
+  return(dados_sem_outliers)
 }
 
 # ----------------------------------------------------------------------------
@@ -103,16 +105,10 @@ gerar_histogramas_vogais <- function(dados_vogais_sem_outliers) {
   
   # Calcular o valor mínimo e máximo dos formantes para definir os limites do eixo X
   min_x <- min(c(dados_vogais_sem_outliers$f1, 
-                 dados_vogais_sem_outliers$f2, 
-                 dados_vogais_sem_outliers$f3, 
-                 dados_vogais_sem_outliers$f4, 
-                 dados_vogais_sem_outliers$f5), na.rm = TRUE)
+                 dados_vogais_sem_outliers$f2), na.rm = TRUE)
   
   max_x <- max(c(dados_vogais_sem_outliers$f1, 
-                 dados_vogais_sem_outliers$f2, 
-                 dados_vogais_sem_outliers$f3, 
-                 dados_vogais_sem_outliers$f4, 
-                 dados_vogais_sem_outliers$f5), na.rm = TRUE)
+                 dados_vogais_sem_outliers$f2), na.rm = TRUE)
   
   # Iterar sobre cada vogal e gerar um gráfico separado
   for (vogal in vogais_unicas) {
@@ -123,9 +119,6 @@ gerar_histogramas_vogais <- function(dados_vogais_sem_outliers) {
     p <- ggplot(dados_vogal) +
       geom_histogram(aes(x = f1), binwidth = 50, fill = "blue", color = "black", alpha = 0.5) +
       geom_histogram(aes(x = f2), binwidth = 50, fill = "red", color = "black", alpha = 0.5) +
-      geom_histogram(aes(x = f3), binwidth = 50, fill = "green", color = "black", alpha = 0.5) +
-      geom_histogram(aes(x = f4), binwidth = 50, fill = "gray", color = "black", alpha = 0.5) +
-      geom_histogram(aes(x = f5), binwidth = 50, fill = "orange", color = "black", alpha = 0.5) +
       labs(title = paste("Histogramas dos Formantes para a Vogal", vogal), 
            x = "Valor do Formante", y = "Frequência") +
       theme_minimal() +
@@ -235,134 +228,464 @@ concatenar_audio_com_filtro <- function(textgrid_palavra_df, audio, filtro_label
 }
 
 # ----------------------------------------------------------------------------
+
+processar_formantes <- function(max_formantes, formantes, textgrid) {
+  # Criar dinamicamente um data frame a partir dos dados de formantes
+  dados_formantes <- data.frame(tempo = formantes$t)
+  
+  # Adicionar colunas dinamicamente para cada formante disponível
+  for (i in 1:formantes$maxnFormants) {
+    col_name <- paste0("f", i)
+    dados_formantes[[col_name]] <- formantes$frequencyArray[i, ]
+  }
+  
+  dados_formantes[, c("f1", "f2", "f3", "f4", "f5")] <- t(apply(dados_formantes[, c("f1", "f2", "f3", "f4", "f5")], 1, function(x) {
+    # Ordena os valores ignorando NAs
+    sorted <- sort(x, na.last = TRUE)
+    return(sorted)
+  }))
+  
+  # Identifica dinamicamente as colunas a serem utilizadas e exclui as demais
+  formantes_cols <- paste0("f", 1:max_formantes)
+  dados_formantes <- dados_formantes[,c("tempo", formantes_cols)]
+  
+  # Converter a tier Palavra do TextGrid em um data frame
+  textgrid_palavra_df <- as.data.frame(textgrid$Palavra)
+  
+  # Obter as vogais únicas do textgrid_palavra_df
+  vogais_unicas <- unique(textgrid_palavra_df$label)
+  vogais_unicas <- setdiff(vogais_unicas, "")  # Exclui a string vazia
+  
+  # Inicializar dataframes para armazenar os resultados
+  dados_vogais_sem_outliers <- data.frame()
+  medias_vogais_sem_outliers <- data.frame()
+  
+  # Loop para processar cada vogal
+  for (vogal in vogais_unicas) {
+    # Recorta formantes para a vogal atual
+    dados_formantes_vogal <- vogal_formantes(vogal, textgrid_palavra_df, dados_formantes)
+    
+    # Remove outliers
+    dados_sem_outliers <- filtrar_outliers(max_formantes,
+                                           dados_formantes_vogal, 
+                                           nivel_confianca = 0.975)
+    
+    # Calcula as médias dos formantes para cada instância da vogal
+    medias_vogal <- calcular_medias_por_instancia(dados_sem_outliers)
+    
+    # Adicionar a vogal como uma nova coluna para identificar nos dataframes
+    dados_sem_outliers <- dados_sem_outliers %>% mutate(vogal = vogal)
+    medias_vogal <- medias_vogal %>% mutate(vogal = vogal)
+    
+    # Acumular os resultados nos dataframes finais
+    dados_vogais_sem_outliers <- rbind(dados_vogais_sem_outliers, dados_sem_outliers)
+    medias_vogais_sem_outliers <- rbind(medias_vogais_sem_outliers, medias_vogal)
+  }
+  
+  # Retornar os dois data frames resultantes
+  return(list(
+    dados_vogais_sem_outliers = dados_vogais_sem_outliers,
+    medias_vogais_sem_outliers = medias_vogais_sem_outliers
+  ))
+}
+
+# ----------------------------------------------------------------------------
+
+analisar_vogal <- function(textgrid, arquivo_audio, vogal, arquivo_saida = "Audio_concatenado.wav") {
+  # Limpar TextGrid e carregar áudio
+  textgrid_palavra_df <- as.data.frame(textgrid$Palavra) %>% filter(label != "")
+  audio <- readWave(arquivo_audio)
+  
+  # Concatenar segmentos de áudio para a vogal especificada
+  audio_concatenado <- concatenar_audio_com_filtro(textgrid_palavra_df, audio, vogal)
+  
+  # Salvar o áudio concatenado no arquivo especificado
+  writeWave(audio_concatenado, arquivo_saida)
+  message(paste("Áudio concatenado salvo em:", arquivo_saida))
+  
+  # Definir uma paleta de cores com mais níveis
+  paleta_cores <- colorRampPalette(c("white", "black"))
+  
+  # Plotar o espectrograma com configurações otimizadas
+  spectro(audio_concatenado, 
+          f = audio_concatenado@samp.rate, 
+          flim = c(0, 5), 
+          ovlp = 90,       # Aumentando a sobreposição para 90%
+          wl = 1024,       # Janela de análise maior para maior resolução
+          scale = TRUE, 
+          osc = TRUE, 
+          tlab = "Tempo (s)",
+          flab = "Frequência (kHz)",
+          palette = paleta_cores,
+          collevels = seq(-40, 0, length.out = 100),  # 100 níveis de cor
+          grid = TRUE)     # Linhas de grade no gráfico
+  
+  # Retornar o áudio concatenado para uso posterior, se necessário
+  return(audio_concatenado)
+}
+
+# ----------------------------------------------------------------------------
+
+calcular_tempos <- function(textgrid, tier_num, texto) {
+  # Verifica se o número do tier é válido
+  if (tier_num < 1 || tier_num > tg.getNumberOfTiers(textgrid)) {
+    stop("Número de tier inválido.")
+  }
+  
+  # Verifica se o tier é do tipo intervalo
+  if (!tg.isIntervalTier(textgrid, tier_num)) {
+    stop("O tier especificado não é do tipo intervalo.")
+  }
+  
+  # Inicializa o tempo total dos segmentos encontrados
+  tempo_total_segmentos <- 0
+  
+  # Obtém o número de intervalos no tier
+  num_intervals <- tg.getNumberOfIntervals(textgrid, tier_num)
+  
+  # Itera pelos intervalos do tier para buscar o texto
+  for (i in seq_len(num_intervals)) {
+    label <- tg.getLabel(textgrid, tier_num, i)
+    if (label == texto) {
+      inicio <- tg.getIntervalStartTime(textgrid, tier_num, i)
+      fim <- tg.getIntervalEndTime(textgrid, tier_num, i)
+      tempo_total_segmentos <- tempo_total_segmentos + (fim - inicio)
+    }
+  }
+  
+  # Obtém o tempo total do TextGrid
+  tmin <- tg.getStartTime(textgrid)
+  tmax <- tg.getEndTime(textgrid)
+  tempo_total <- tmax - tmin
+  
+  # Calcula o percentual do tempo
+  percentual <- (tempo_total_segmentos / tempo_total) * 100
+  
+  # Retorna os resultados
+  list(
+    tempo_total_segmentos = tempo_total_segmentos,
+    tempo_total = tempo_total,
+    percentual = percentual
+  )
+}
+
+# ----------------------------------------------------------------------------
+
+gerar_dataframe_textgrid <- function(textgrid) {
+  
+  # Obtém os nomes dos tiers de interesse
+  tier_names <- sapply(1:tg.getNumberOfTiers(textgrid), function(i) tg.getTierName(textgrid, i))
+  tier_anotacoes <- which(tier_names == "Anotações")
+  tier_idios <- which(tier_names == "Idios")
+  
+  # Verifica se os tiers foram encontrados corretamente
+  if (length(tier_anotacoes) != 1 || length(tier_idios) != 1) {
+    stop("Erro: Um ou mais tiers não foram encontrados ou há múltiplos tiers com o mesmo nome.")
+  }
+  
+  # Função para obter a descrição do tipo de anotação
+  obter_anotacao_texto <- function(anotacao) {
+    switch(anotacao,
+           '1' = 'Abaixamento',
+           '2' = 'Alçamento',
+           '3' = 'Ditongação',
+           '4' = 'Monotongação',
+           '5' = 'Palatalização da oclusiva alveolar /t/',
+           '6' = 'Palatalização da oclusiva alveolar /d/',
+           '7' = 'Palatalização da fricativa alveolar /s/ em coda',
+           '8' = 'Alongamento',
+           '9' = 'Aspectos Prosódicos',
+           '10' = 'Aférese',
+           '11' = 'Apócope',
+           '12' = 'Síncope',
+           '13' = 'Sândi',
+           '14' = 'Haplologia (inter ou intrapalavras)',
+           '15' = 'Elisão silábica',
+           '16' = 'Concordância',
+           '17' = 'Marcador Discursivo',
+           '18' = 'Pausa Preenchida',
+           '19' = 'Desnasalização',
+           '20' = 'Disfluência',
+           '21' = 'Ênfase',
+           '22' = 'Epêntese',
+           '23' = 'Iotização',
+           '24' = 'Metátese',
+           '25' = 'Hipértese',
+           '26' = 'Nome Próprio',
+           '27' = 'Rotacismo',
+           '28' = 'Lambdacismo',
+           '29' = 'Velarização Fricativa',
+           '30' = 'Rótico em ataque inicial',
+           '31' = 'Rótico em ataque medial',
+           '32' = 'Rótico em coda medial',
+           '33' = 'Rótico em coda final',
+           '34' = 'Variação Livre',
+           '35' = 'Comentário',
+           anotacao
+    )
+  }
+  
+  # Cria uma lista de dataframes para cada intervalo do tier "Anotações"
+  dados <- lapply(1:tg.getNumberOfIntervals(textgrid, tier_anotacoes), function(i) {
+    anotacao <- tg.getLabel(textgrid, tier_anotacoes, i)
+    t_inicio <- tg.getIntervalStartTime(textgrid, tier_anotacoes, i)
+    t_fim <- tg.getIntervalEndTime(textgrid, tier_anotacoes, i)
+    
+    # Obtém os valores correspondentes dos tiers "Idios" no mesmo intervalo de tempo
+    idios <- tg.getLabel(textgrid, tier_idios, tg.getIntervalIndexAtTime(textgrid, tier_idios, (t_inicio + t_fim) / 2))
+    
+    # Separa anotações por vírgula, se houver mais de uma
+    anotacoes_split <- strsplit(anotacao, ",")[[1]]
+    anotacoes_split <- trimws(anotacoes_split) # Remove espaços em branco
+    
+    # Cria um dataframe para cada anotação
+    lapply(anotacoes_split, function(anotacao_individual) {
+      data.frame(Anotacao = obter_anotacao_texto(anotacao_individual), TempoInicio = t_inicio, TempoFim = t_fim, Idios = idios, stringsAsFactors = FALSE)
+    })
+  })
+  
+  # Converte a lista em um dataframe e realiza as operações de filtragem e ordenação
+  df <- do.call(rbind, unlist(dados, recursive = FALSE))
+  df <- df[df$Anotacao != "", ]
+  df <- df[order(df$Anotacao), ]
+  
+  return(df)
+}
+
+# ----------------------------------------------------------------------------
+
+# Combinar os dois dataframes de fl
+combine_fl <- function(df1, df2) {
+  # Agrupar e concatenar os valores únicos da coluna Idios no primeiro dataframe
+  grouped_df1 <- df1 %>%
+    group_by(Anotacao) %>%
+    summarise(Idios1 = paste(unique(Idios), collapse = "; "))
+  
+  # Agrupar e concatenar os valores únicos da coluna Idios no segundo dataframe
+  grouped_df2 <- df2 %>%
+    group_by(Anotacao) %>%
+    summarise(Idios2 = paste(unique(Idios), collapse = "; "))
+  
+  # Combinar os dois agrupamentos
+  combinado <- full_join(grouped_df1, grouped_df2, by = "Anotacao")
+  colnames(combinado) <- c("Variáveis linguísticas", "Questionado", "Padrão")
+  
+  # Ordenar a tabela pela coluna "Variáveis linguísticas"
+  combinado <- combinado[order(combinado$`Variáveis linguísticas`), ]
+  combinado[is.na(combinado)] <- ""
+  
+  return(combinado)
+}
+
+# ----------------------------------------------------------------------------
+
+pitchtier_dataframe <- function(textgrid, arquivo, origem) {
+  # Ler o arquivo de PitchTier
+  pitchTier <- pt.read(arquivo, encoding = "auto")
+  
+  # Extrair tempos e frequências do PitchTier
+  tempos <- pitchTier$t  # Vetor de tempos
+  frequencias <- pitchTier$f  # Frequências correspondentes aos tempos
+  
+  # Criar DataFrame
+  data <- data.frame(
+    Tempo = tempos,
+    Frequency = frequencias
+  )
+  
+  # Adicionar a coluna de origem
+  data$Origem <- origem
+  
+  # Converter a tier Vozes do TextGrid em um DataFrame
+  textgrid_Vozes_df <- as.data.frame(textgrid$Vozes)
+  textgrid_Vozes_df <- textgrid_Vozes_df[textgrid_Vozes_df$label != "", ] # Exclui as strings vazias
+  
+  # Filtrar pelo intervalo de tempo definido no TextGrid
+  condicao <- sapply(data$Tempo, function(tempo) {
+    any(tempo >= textgrid_Vozes_df$t1 & tempo <= textgrid_Vozes_df$t2)
+  })
+  data_filtrado <- data[condicao, ]
+  
+  # Detectar e remover outliers univariados na coluna Frequency
+  # Utiliza a função adjboxStats (adjusted boxplot) do pacote robustbase
+  boxplot_stats <- adjboxStats(data_filtrado$Frequency)
+  outlier_limites <- boxplot_stats$fence # Limites inferior e superior
+  data_sem_outliers <- data_filtrado[
+    data_filtrado$Frequency >= outlier_limites[1] & 
+      data_filtrado$Frequency <= outlier_limites[2], 
+  ]
+  
+  return(data_sem_outliers)
+}
+
+# ----------------------------------------------------------------------------
+
+# Função para converter PitchTier em DataFrame e filtrar por presença ou ausência de um valor específico em uma tier
+pitchtier_dataframe <- function(textgrid, arquivo, origem, tier_nome, valor_tier = "", filtrar_presenca = FALSE) {
+  # Ler o arquivo de PitchTier
+  pitchTier <- pt.read(arquivo, encoding = "auto")
+  
+  # Extrair tempos e frequências do PitchTier
+  tempos <- pitchTier$t  # Vetor de tempos
+  frequencias <- pitchTier$f  # Frequências correspondentes aos tempos
+  
+  # Criar DataFrame inicial
+  data <- data.frame(
+    Tempo = tempos,
+    Frequency = frequencias,
+    Origem = origem
+  )
+  
+  # Verificar se a tier especificada existe no TextGrid
+  tier_index <- tryCatch({
+    tg.checkTierInd(textgrid, tier_nome)
+  }, error = function(e) {
+    stop(paste("A tier", tier_nome, "não existe no TextGrid fornecido."))
+  })
+  
+  # Extrair a tier especificada
+  tier <- textgrid[[tier_index]]
+  
+  # Converter a tier em um data frame
+  if (tier$type == "interval") {
+    tier_df <- data.frame(
+      t1 = tier$t1,
+      t2 = tier$t2,
+      label = tier$label
+    )
+  } else if (tier$type == "point") {
+    tier_df <- data.frame(
+      t = tier$t,
+      label = tier$label
+    )
+  } else {
+    stop("Tipo de tier não suportado.")
+  }
+  
+  # Filtrar o data frame da tier pelo valor especificado
+  tier_df_filtrado <- subset(tier_df, label == valor_tier)
+  
+  # Filtrar os dados principais com base nos tempos da tier filtrada
+  if (tier$type == "interval") {
+    condicao <- sapply(data$Tempo, function(tempo) {
+      any(tempo >= tier_df_filtrado$t1 & tempo <= tier_df_filtrado$t2)
+    })
+  } else if (tier$type == "point") {
+    condicao <- data$Tempo %in% tier_df_filtrado$t
+  }
+  
+  # Ajustar a condição com base no parâmetro filtrar_presenca
+  if (!filtrar_presenca) {
+    condicao <- !condicao
+  }
+  
+  data_filtrado <- data[condicao, ]
+  
+  # Detectar e remover outliers univariados na coluna Frequency
+  # Utiliza a função adjboxStats (adjusted boxplot) do pacote robustbase
+  boxplot_stats <- adjboxStats(data_filtrado$Frequency)
+  outlier_limites <- boxplot_stats$fence # Limites inferior e superior
+  data_sem_outliers <- data_filtrado[
+    data_filtrado$Frequency >= outlier_limites[1] & 
+      data_filtrado$Frequency <= outlier_limites[2], 
+  ]
+  
+  return(data_sem_outliers)
+}
+
+# ----------------------------------------------------------------------------
 # Principal
 # ----------------------------------------------------------------------------
 
 # Diretório de trabalho e leitura dos arquivos
-setwd("~/Parsel")
+setwd("D:/Meu Drive/Em processamento/Protocolo 044962.2024 Requisição Digital/Em processamento")
 
-# Ler arquivo TextGrid e arquivo de formantes
-textgrid <- tg.read("Audio_da_confissão.TextGrid")
-formantes <- formant.read("Audio_da_confissão.Formant")
+# Ler arquivo TextGrid e arquivo de formantes do Questionado
+textgrid <- tg.read("Audio_da_confissão.TextGrid", encoding = "auto")
+
+formantes <- formant.read("Audio_da_confissão.Formant", encoding = "auto")
 formantes <- formant.toArray(formantes)
 
-# Obter o número de formantes detectados
-num_formantes <- dim(formantes$frequencyArray)[1]
+# Formantes
+num_formantes <- formantes$maxnFormants
+resultado <- processar_formantes(2, formantes, textgrid)
 
-# Criar dinamicamente um data frame a partir dos dados de formantes
-dados_formantes <- data.frame(tempo = formantes$t)
-
-# Adicionar colunas dinamicamente para cada formante disponível
-for (i in 1:num_formantes) {
-  col_name <- paste0("f", i)
-  dados_formantes[[col_name]] <- formantes$frequencyArray[i, ]
-}
-
-# Converter a tier Palavra do TextGrid em um data frame
-textgrid_palavra_df <- as.data.frame(textgrid$Palavra)
-
-# Obter as vogais únicas do textgrid_palavra_df
-vogais_unicas <- unique(textgrid_palavra_df$label)
-vogais_unicas <- setdiff(vogais_unicas, "")  # Exclui a string vazia
-
-# Inicializar dataframes para armazenar os resultados
-dados_vogais_sem_outliers <- data.frame()
-medias_vogais_sem_outliers <- data.frame()
-
-# Loop para processar cada vogal
-for (vogal in vogais_unicas) {
-  # Recorta formantes para a vogal atual
-  dados_formantes_vogal <- vogal_formantes(vogal, textgrid_palavra_df, dados_formantes)
-  
-  # Remove outliers usando a distância de Mahalanobis
-  dados_sem_outliers <- filtrar_outliers_mahalanobis(dados_formantes_vogal, 
-                                                     nivel_confianca = 0.975)
-  
-  # Calcula as médias dos formantes para cada instância da vogal
-  medias_vogal <- calcular_medias_por_instancia(dados_sem_outliers)
-  
-  # Adicionar a vogal como uma nova coluna para identificar nos dataframes
-  dados_sem_outliers <- dados_sem_outliers %>% mutate(vogal = vogal)
-  medias_vogal <- medias_vogal %>% mutate(vogal = vogal)
-  
-  # Acumular os resultados nos dataframes finais
-  dados_vogais_sem_outliers <- rbind(dados_vogais_sem_outliers, dados_sem_outliers)
-  medias_vogais_sem_outliers <- rbind(medias_vogais_sem_outliers, medias_vogal)
-}
+dados_vogais_sem_outliers <- resultado$dados_vogais_sem_outliers
+medias_vogais_sem_outliers <- resultado$medias_vogais_sem_outliers
 
 gerar_histogramas_vogais(dados_vogais_sem_outliers)
+gerar_histogramas_vogais(medias_vogais_sem_outliers)
 
-# Definir a fração (metade aproximadamente)
-frac <- 0.5
+# Ler arquivo TextGrid e arquivo de formantes do Padrão
+textgrid_padrao <- tg.read("padrao.TextGrid", encoding = "auto")
+formantes_padrao <- formant.read("padrao.Formant", encoding = "auto")
+formantes_padrao <- formant.toArray(formantes_padrao)
 
-# Gerar o primeiro dataframe com metade dos dados de forma aleatória, sem reposição
-df1 <- dados_vogais_sem_outliers %>% sample_frac(frac)
-df1_mv <- medias_vogais_sem_outliers %>% sample_frac(frac)
+num_formantes_padrao <- formantes_padrao$maxnFormants
+resultado_padrao <- processar_formantes(2, formantes_padrao, textgrid_padrao)
 
-# Gerar o segundo dataframe com os dados restantes (aqueles que não foram selecionados no primeiro)
-df2 <- dados_vogais_sem_outliers %>% anti_join(df1)
-df2_mv <- medias_vogais_sem_outliers %>% anti_join(df1_mv)
+dados_vogais_sem_outliers_padrao <- resultado_padrao$dados_vogais_sem_outliers
+medias_vogais_sem_outliers_padrao <- resultado_padrao$medias_vogais_sem_outliers
 
-# Verificar o tamanho dos dataframes resultantes
-nrow(df1)  # Tamanho do primeiro dataframe
-nrow(df2)  # Tamanho do segundo dataframe
+gerar_histogramas_vogais(dados_vogais_sem_outliers_padrao)
+gerar_histogramas_vogais(medias_vogais_sem_outliers_padrao)
 
+# Fala exclusiva
+fala_liquida_questionado <- calcular_tempos(textgrid, 1, "VM1.1")
+print(fala_liquida_questionado)
 
-# Adicionar uma coluna de grupo para diferenciar os dataframes
-df1 <- df1 %>% mutate(grupo = "padrão")
-df2 <- df2 %>% mutate(grupo = "questionado")
+fala_liquida_padrao <- calcular_tempos(textgrid_padrao, 1, "VM.1")
+print(fala_liquida_padrao)
 
-df1_mv <- df1_mv %>% mutate(grupo = "padrão")
-df2_mv <- df2_mv %>% mutate(grupo = "questionado")
+# Cria planilhas para as ocorrência de fenômenos linguisticos
+fl_questionado <- gerar_dataframe_textgrid(textgrid)
+write.xlsx(fl_questionado, "fl_questionado.xlsx", rownames = TRUE)
+write.csv(fl_questionado, "fl_questionado.csv", row.names = FALSE, quote = FALSE, fileEncoding = "UTF-8")
 
-df_combinado <- rbind(df1, df2)
-df_combinado_mv <- rbind(df1_mv, df2_mv)
+fl_padrao <- gerar_dataframe_textgrid(textgrid_padrao)
+write.xlsx(fl_padrao, "fl_padrao.xlsx", rownames = TRUE)
+write.csv(fl_padrao, "fl_padrao.csv", row.names = FALSE, quote = FALSE, fileEncoding = "UTF-8")
 
-# Realizar a MANOVA usando as variáveis Media_F1, Media_F2 e Media_F3
-manova_resultado <- manova(cbind(f1, f2, f3) ~ grupo + vogal + grupo*vogal, data = df_combinado)
+tabela_fl <- combine_fl(fl_questionado, fl_padrao)
+write.xlsx(tabela_fl, "tabela_fl.xlsx", rownames = TRUE)
+write.csv(tabela_fl, "tabela_fl.csv", row.names = FALSE, quote = FALSE, fileEncoding = "UTF-8")
 
-# Mostrar a tabela de testes estatísticos, como o teste de Wilks
-summary(manova_resultado, test = "Wilks")
+# Adicionar uma coluna de grupo para diferenciar os dataframes e combiná-los
+dados_vogais_sem_outliers_padrao <- dados_vogais_sem_outliers_padrao %>% mutate(grupo = "padrão")
+dados_vogais_sem_outliers <- dados_vogais_sem_outliers %>% mutate(grupo = "questionado")
 
-# Teste de Homogeneidade de Variâncias - Box's M
-# Preparar os dados para o teste de Box
-dados_box <- df_combinado[, c("f1", "f2", "f3", "grupo")]
+medias_vogais_sem_outliers_padrao <- medias_vogais_sem_outliers_padrao %>% mutate(grupo = "padrão")
+medias_vogais_sem_outliers <- medias_vogais_sem_outliers %>% mutate(grupo = "questionado")
 
-# Teste de Box para homogeneidade de covariâncias
-box_test <- boxM(df_combinado[, c("f1", "f2", "f3")], df_combinado$grupo)
+#
+# Combina os arquivos
+#
 
-# Exibir o resultado do teste de Box
-print("Teste de Homogeneidade de Variâncias - Box's M:")
-print(box_test)
+df_combinado <- rbind(medias_vogais_sem_outliers_padrao, medias_vogais_sem_outliers)
+# df_combinado <- rbind(dados_vogais_sem_outliers_padrao, dados_vogais_sem_outliers)
 
-# Extração dos resíduos da MANOVA
-residuos <- residuals(manova_resultado)
+# Filtrar as linhas que contêm apenas as vogais "a" ou "e"
+df_filtrado <- df_combinado[df_combinado$vogal %in% c("a", "e", "eh"), ]
+df_filtrado <- df_combinado
 
-# Teste de Aderência à Normalidade Multivariada
-# Aplicar o teste de normalidade multivariada (Henze-Zirkler)
-normalidade_teste <- mvn(residuos, multivariatePlot = "qq", mvnTest = "hz")
+# # Ajustar o modelo MANOVA
+# modelo_manova <- manova(cbind(f1, f2) ~ grupo * vogal, data = df_filtrado)
+# 
+# # Resumo do modelo
+# summary(modelo_manova)
 
-# Exibir o resultado do teste de Henze-Zirkler
-print("Teste de Normalidade Multivariada - Henze-Zirkler:")
-print(normalidade_teste)
-
-# Realizar a MANOVA não paramétrica (PERMANOVA)
-# Utilizando a distância Euclidiana para calcular a dissimilaridade
-permanova_resultado <- adonis2(cbind(df_combinado$f1, df_combinado$f2, df_combinado$f3) ~ grupo, 
-                               data = df_combinado, method = "euclidean", permutations = 999)
-# Exibir o resultado da PERMANOVA
-print("Resultado da MANOVA não paramétrica (PERMANOVA):")
-print(permanova_resultado)
-
-# PCA
-resultado_pca <- realizar_pca_vogal(df_combinado, "a")
-
-resultado_pca$scree_plot
-resultado_pca$var_plot  
-resultado_pca$ind_plot  
+# Realizar a PERMANOVA com maior número de permutações
+permanova_resultado <- adonis2(
+  df_filtrado[, c("f1", "f2")] ~ grupo + vogal + grupo*vogal,
+  data = df_filtrado,
+  method = "euclidean",
+  by = "terms",
+  parallel = 10,
+  permutations = 999 # Número de permutações
+)
 
 # Calcular as médias de f1 e f2 agrupadas por vogal e grupo
-df_medias <- df_combinado %>%
+df_medias <- df_filtrado %>%
   group_by(vogal, grupo) %>%
   summarise(f1_media = mean(f1, na.rm = TRUE),
             f2_media = mean(f2, na.rm = TRUE))
@@ -385,7 +708,7 @@ ggplot(df_medias, aes(x = f2_media, y = f1_media, color = grupo, shape = vogal, 
   )
 
 # Calcular as médias de f1 e f2 agrupadas por vogal e grupo
-df_medias <- df_combinado %>%
+df_medias <- df_filtrado %>%
   group_by(vogal, grupo) %>%
   summarise(f1_media = mean(f1, na.rm = TRUE),
             f2_media = mean(f2, na.rm = TRUE))
@@ -393,7 +716,7 @@ df_medias <- df_combinado %>%
 # Criar o gráfico combinando hexbin, pontos e linhas
 ggplot() +
   # Adicionar o hexbin plot, com ajuste do número de bins
-  geom_hex(data = df_combinado, aes(x = f2, y = f1), bins = 20, alpha = 0.4) +
+  geom_hex(data = df_filtrado, aes(x = f2, y = f1), bins = 20, alpha = 0.4) +
   
   # Alterar a escala de cor do hexbin de branco para amarelo
   scale_fill_gradient(low = "white", high = "black") +  # Degradê
@@ -427,50 +750,166 @@ ggplot() +
   )
 
 # Boxplot para F1 e F2 lado a lado para cada vogal
-ggplot(df_combinado, aes(x = vogal, y = f1, fill = grupo)) +
+ggplot(df_filtrado, aes(x = vogal, y = f1, fill = grupo)) +
   geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F1 com grupos lado a lado
   labs(title = "Boxplots de F1 por vogal e grupo", x = "Vogal", y = "F1", fill = "Grupo") +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
 
 # Boxplot de F2 com grupos lado a lado para cada vogal
-ggplot(df_combinado, aes(x = vogal, y = f2, fill = grupo)) +
+ggplot(df_filtrado, aes(x = vogal, y = f2, fill = grupo)) +
   geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F2 com grupos lado a lado
   labs(title = "Boxplots de F2 por vogal e grupo", x = "Vogal", y = "F2", fill = "Grupo") +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
 
-# Limpar TextGrid e carregar áudio
-textgrid_palavra_df <- as.data.frame(textgrid$Palavra) %>% filter(label != "")
-audio <- readWave("Audio_da_confissão.wav")
-
-# Chamar a função com filtro para a vogal "a"
-audio_concatenado <- concatenar_audio_com_filtro(textgrid_palavra_df, audio, "a")
-
-# Tocar o áudio concatenado (opcional)
-# play(audio_concatenado)
-
-# Salvar o áudio concatenado (opcional)
-writeWave(audio_concatenado, "Audio_concatenado.wav")
-
-# Plotar o oscilograma (forma de onda)
+# # Análise de seleção concatenada
+# # Limpar TextGrid e carregar áudio
+# textgrid_palavra_df <- as.data.frame(textgrid$Palavra) %>% filter(label != "")
+# audio <- readWave("Audio_da_confissão_mono.wav")
+# 
+# # Chamar a função com filtro para a vogal "a"
+# audio_concatenado <- concatenar_audio_com_filtro(textgrid_palavra_df, audio, "a")
+# 
+# # Tocar o áudio concatenado (opcional)
+# # play(audio_concatenado)
+# 
+# # Salvar o áudio concatenado (opcional)
+# writeWave(audio_concatenado, "Audio_concatenado.wav")
+# 
+# # Plotar o oscilograma (forma de onda)
 # oscillo(audio_concatenado, f = audio_concatenado@samp.rate)
+# 
+# 
+# # Definindo uma paleta de cores com mais níveis de cores
+# paleta_cores <- colorRampPalette(c("white",
+#                                     "black"))
+# 
+# # Aumentando a janela de análise (wl) e sobreposição (ovlp) para melhorar a resolução
+# spectro(audio_concatenado,
+#         f = audio_concatenado@samp.rate,
+#         flim = c(0, 5),
+#         ovlp = 90,  # Aumentando a sobreposição para 90%
+#         wl = 1024,  # Aumentando a janela de análise para mais resolução
+#         scale = TRUE,
+#         osc = TRUE,
+#         tlab = "Tempo (s)",
+#         flab = "Frequência (kHz)",
+#         palette = paleta_cores,
+#         collevels = seq(-40, 0, length.out = 100),  # 100 níveis de cor
+#         grid = TRUE)  # Adiciona linhas de grade ao gráfico
+# 
+# 
+# # Chamar a função para a vogal "a"
+# audio_concatenado <- analisar_vogal(
+#    textgrid = textgrid,
+#    arquivo_audio = "Audio_da_confissão_mono.wav",
+#    vogal = "a",
+#    arquivo_saida = "Audio_concatenado_a.wav"
+# )
 
+# ----------------------------------------------------------------------------
+# Carregar e combinar arquivos de Pitch usando pitch.toFrame
+# ----------------------------------------------------------------------------
 
-# Definindo uma paleta de cores com mais níveis de cores
-paleta_cores <- colorRampPalette(c("white", 
-                                   "black"))
+# Função para converter PitchTier para DataFrame convencional
+# Instalar o pacote robustbase (caso não esteja instalado)
+if (!requireNamespace("robustbase", quietly = TRUE)) {
+  install.packages("robustbase")
+}
 
-# Aumentando a janela de análise (wl) e sobreposição (ovlp) para melhorar a resolução
-spectro(audio_concatenado, 
-        f = audio_concatenado@samp.rate, 
-        flim = c(0, 5), 
-        ovlp = 90,  # Aumentando a sobreposição para 90%
-        wl = 1024,  # Aumentando a janela de análise para mais resolução
-        scale = TRUE, 
-        osc = TRUE, 
-        tlab = "Tempo (s)",
-        flab = "Frequência (kHz)",
-        palette = paleta_cores,
-        collevels = seq(-40, 0, length.out = 100),  # 100 níveis de cor
-        grid = TRUE)  # Adiciona linhas de grade ao gráfico
+# Função atualizada para converter PitchTier e filtrar outliers
+options(mc_doScale_quiet = TRUE)
+
+# Processar os arquivos de Pitch
+pitch_padrao <- pitchtier_dataframe(textgrid_padrao, "padrao.PitchTier", "Padrão", "Vozes")
+pitch_questionado <- pitchtier_dataframe(textgrid,"Audio_da_confissão.PitchTier", "Questionado", "Vozes")
+
+hist(pitch_questionado$Frequency)
+hist(pitch_padrao$Frequency)
+
+pitch_combinado <- rbind(pitch_padrao, pitch_questionado)
+
+# Criando tibbles separados para cada grupo
+grupo1 <- tibble(value = pitch_combinado$Frequency[pitch_combinado$Origem == unique(pitch_combinado$Origem)[1]])
+grupo2 <- tibble(value = pitch_combinado$Frequency[pitch_combinado$Origem == unique(pitch_combinado$Origem)[2]])
+
+# Calculando bins ótimos
+bins_grupo1 <- opt_bin(grupo1, value)
+bins_grupo2 <- opt_bin(grupo2, value)
+
+# Usando a média do número de bins dos dois grupos
+n_bins_otimo <- mean(c(nrow(bins_grupo1), nrow(bins_grupo2)))
+
+# Criando o histograma com legenda interna
+ggplot(pitch_combinado, aes(x = Frequency, fill = Origem)) +
+  geom_histogram(aes(y = ..density..), 
+                 position = "identity", 
+                 alpha = 0.5,
+                 bins = n_bins_otimo,
+                 colour = "gray",    
+                 linewidth = 0.2) +   
+  scale_fill_manual(values = c("coral", "lightblue")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Histograma da Frequência por Origem",
+       x = "Frequência",
+       y = "Densidade") +
+  theme_classic() +
+  theme(panel.grid.major = element_line(color = "gray90", linewidth = 0.2),
+        panel.grid.minor = element_line(color = "gray95", linewidth = 0.1),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.position = c(0.95, 0.95),          # Posição da legenda (x,y)
+        legend.justification = c(1, 1),           # Alinhamento da legenda
+        legend.background = element_rect(fill = "white", color = "black"),  # Fundo e borda da legenda
+        legend.margin = margin(5, 5, 5, 5))       # Margem interna da legenda
+
+# Realizar a PERMANOVA com maior número de permutações
+permanova_resultado <- adonis2(
+  pitch_combinado$Frequency ~ pitch_combinado$Origem,
+  data = pitch_combinado,
+  method = "euclidean",
+  by = "terms",
+  parallel = 10,
+  permutations = 999 # Número de permutações
+)
+
+# Exibir o resultado detalhado
+print(permanova_resultado)
+
+# Convertendo os fatores para 'factor'
+pitch_combinado$Origem <- as.factor(pitch_combinado$Origem)
+
+# ANOVA não-paramétrica
+art_pitch <- art(Frequency ~ Origem, data = pitch_combinado)
+anova(art_pitch)
+posthoc_art_pitch <- art.con(art_pitch, "Origem")
+summary(posthoc_art_pitch)
+
+# Extraindo informações do teste post-hoc
+comparacoes <- data.frame(summary(posthoc_art_pitch))
+
+# Calculando as médias originais por grupo
+medias_originais <- aggregate(Frequency ~ Origem, data = pitch_combinado, mean)
+
+# Criando dataframe com as diferenças nas unidades originais
+df_comparacoes <- data.frame(
+  Comparacao = paste(comparacoes$contrast),
+  Diferenca = NA,
+  p_valor = comparacoes$p.value
+)
+
+# Preenchendo as diferenças nas unidades originais
+for(i in 1:nrow(df_comparacoes)) {
+  grupos <- strsplit(as.character(df_comparacoes$Comparacao[i]), " - ")[[1]]
+  media1 <- medias_originais$Frequency[medias_originais$Origem == grupos[1]]
+  media2 <- medias_originais$Frequency[medias_originais$Origem == grupos[2]]
+  df_comparacoes$Diferenca[i] <- media1 - media2
+}
+
+# Arredondando valores e formatando p-valores
+df_comparacoes$Diferenca <- round(df_comparacoes$Diferenca, 2)
+df_comparacoes$p_valor <- format.pval(df_comparacoes$p_valor, digits = 3)
+
+# Ordenando por p-valor
+df_comparacoes <- df_comparacoes[order(df_comparacoes$p_valor), ]
+print(df_comparacoes)
