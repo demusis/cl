@@ -1,7 +1,7 @@
 ui <- fluidPage(
   useShinyjs(),
   theme = theme,
-  titlePanel("Análise de Áudio"),
+  titlePanel("Análise estatístisca de arquivos do Praat para comparação de locutor"),
   sidebarLayout(
     sidebarPanel(
       width = 3,
@@ -54,8 +54,14 @@ ui <- fluidPage(
       # Seção Processamento
       wellPanel(
         h4("Processamento"),
-        sliderInput("num_repeticoes",
-                    "Número de repetições:",
+        textInput(
+          inputId = "id",
+          label = "Identificador:",
+          value = "VM1.1",
+          placeholder = "Digite um identificador"
+        ),
+        sliderInput("num_permutacoes",
+                    "Número de permutações:",
                     min = 10,
                     max = 10000,
                     value = 100,
@@ -83,16 +89,35 @@ ui <- fluidPage(
       tabsetPanel(
         id = "tabs",
         tabPanel(
-          "Status",
-          withSpinner(verbatimTextOutput("status_processamento"))
+          "Descritivas",
+          withSpinner(verbatimTextOutput("descritivas")),
+          h5("Fala exclusiva"),
+          h6("Padrão"),
+          withSpinner(verbatimTextOutput("fe_padrao")),
+          h6("Questionado"),
+          withSpinner(verbatimTextOutput("fe_questionado")),
+          h5("Processos"),
+          withSpinner(DTOutput("tabela_socio"))
         ),
         tabPanel(
-          "Resultados",
-          withSpinner(DTOutput("resultados_tabela"))
+          "Formantes",
+          h5("PERM ANOVA"),
+          withSpinner(DTOutput("anova_tabela")),
+          h5("Gráfico de dispersão por formantes (f1 e f2), vogais selecionadas e grupo"),
+          withSpinner(plotOutput("hexvogais")),
+          h5("Box-plot de f1 por vogais selecionadas e grupo"),
+          withSpinner(plotOutput("boxplotvogaisf1")),
+          h5("Box-plot de f2 por vogais selecionadas e grupo"),
+          withSpinner(plotOutput("boxplotvogaisf2"))
         ),
         tabPanel(
-          "Gráficos",
-          withSpinner(plotOutput("grafico_resultados"))
+          "Pitch",
+          h5("Histogramas de f0 por grupo"),
+          withSpinner(plotOutput("histf0")),
+          h5("PERM ANOVA"),
+          withSpinner(DTOutput("anova_pitch")),
+          h5("Comparações de médias (não-paramétrica)"),
+          withSpinner(DTOutput("anova_posthoc"))
         )
       )
     )

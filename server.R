@@ -39,45 +39,390 @@ server <- function(input, output, session) {
     # Observa o clique do botão processar
     observeEvent(input$processar_btn, {
       # Inicia processamento
-      withProgress(message = 'Processando dados...', {
+      withProgress(message = 'Organizando os dados...', value = 0, {
         resultados_processamento$status <- "Processamento iniciado..."
         
         # Simula cálculo pesado
         resultados <- isolate({
-          # Seu código de processamento aqui
-          Sys.sleep(2) # Simula processamento
-          list(
-            dados = runif(100),
-            timestamp = Sys.time()
-          )
+          n <- 11
+          
+          # Ler arquivo TextGrid e arquivo de formantes do Padrao e Questionado
+          textgrid_padrao <<- tg.read(input$padrao_textgrid$datapath, 
+                                     encoding = "auto")
+          incProgress(1/n)
+          formantes_padrao <<- formant.read(input$padrao_formant$datapath, 
+                                           encoding = "auto")
+          incProgress(1/n)
+          formantes_padrao <<- formant.toArray(formantes_padrao)
+          incProgress(1/n)
+          
+          textgrid  <<- tg.read(input$quest_textgrid$datapath, 
+                               encoding = "auto")
+          incProgress(1/n)
+          formantes <<- formant.read(input$quest_formant$datapath, 
+                                    encoding = "auto")
+          incProgress(1/n)
+          formantes <<- formant.toArray(formantes)
+          incProgress(1/n)
+          
+          # Ler e processar os arquivos de Pitch
+          pitch_padrao <<- pitchtier_dataframe(textgrid_padrao, 
+                                              input$padrao_pitchtier$datapath, 
+                                              "Padrão", 
+                                              "Vozes")
+          incProgress(1/n)
+          
+          pitch_questionado <<- pitchtier_dataframe(textgrid,
+                                                   input$quest_pitchtier$datapath, 
+                                                   "Questionado", 
+                                                   "Vozes")
+          pitch_combinado <<- rbind(pitch_padrao, pitch_questionado)
+          incProgress(1/n)
+          
+          resultado_padrao <- processar_formantes(2, formantes_padrao, textgrid_padrao)
+          dados_vogais_sem_outliers_padrao <- resultado_padrao$dados_vogais_sem_outliers
+          
+          resultado <- processar_formantes(2, formantes, textgrid)
+          dados_vogais_sem_outliers <- resultado$dados_vogais_sem_outliers
+          incProgress(1/n)
+          
+          # Adicionar uma coluna de grupo para diferenciar os dataframes e combiná-los
+          dados_vogais_sem_outliers_padrao <- dados_vogais_sem_outliers_padrao %>% mutate(grupo = "padrão")
+          dados_vogais_sem_outliers <- dados_vogais_sem_outliers %>% mutate(grupo = "questionado")
+          
+          medias_vogais_sem_outliers <- resultado$medias_vogais_sem_outliers
+          medias_vogais_sem_outliers_padrao <- resultado_padrao$medias_vogais_sem_outliers
+          
+          medias_vogais_sem_outliers_padrao <- medias_vogais_sem_outliers_padrao %>% mutate(grupo = "padrão")
+          medias_vogais_sem_outliers <- medias_vogais_sem_outliers %>% mutate(grupo = "questionado")
+          
+          df_combinado <- rbind(medias_vogais_sem_outliers_padrao, medias_vogais_sem_outliers)
+          incProgress(1/n)
+          
+          # Filtrar as linhas que contêm apenas as vogais selecionadas
+          df_filtrado <<- df_combinado[df_combinado$vogal %in% input$vogais_selecionadas, ]
         })
         
         # Armazena resultados
-        resultados_processamento$dados_calculados <- resultados
-        resultados_processamento$status <- "Processamento concluído"
+        # resultados_processamento$dados_calculados <- resultados
+        resultados_processamento$status <- "Processamento concluído."
       })
     })
     
     # Renderiza outputs reativos
-    output$status_processamento <- renderText({
+    output$descritivas <- renderText({
       req(resultados_processamento$status)
       resultados_processamento$status
     })
     
-    output$resultados_tabela <- renderDT({
-      req(resultados_processamento$dados_calculados)
-      # Processa dados para tabela
-      datatable(data.frame(
-        valores = resultados_processamento$dados_calculados$dados
-      ))
+    output$fe_padrao <- renderText({
+      req(resultados_processamento$status)
+      fala_liquida_padrao <- calcular_tempos(textgrid_padrao, 1, input$id)
+      
+      # Garantir que os valores são numéricos e arredondar para duas casas decimais
+      valores <- round(as.numeric(unlist(fala_liquida_padrao)), 2)
+      
+      # Formatar os resultados
+      texto_formatado <- sprintf(
+        "Total: %.2f s, com fala exclusiva: %.2f s, correspondendo a %.2f%%.",
+        valores[2], valores[1], valores[3]
+      )
+      
+      texto_formatado
     })
     
-    output$grafico_resultados <- renderPlot({
-      req(resultados_processamento$dados_calculados)
-      # Processa dados para gráfico
-      plot(resultados_processamento$dados_calculados$dados)
+    
+    output$fe_questionado <- renderText({
+      req(resultados_processamento$status)
+      fala_liquida_questionado <- calcular_tempos(textgrid, 1, input$id)
+      
+      # Garantir que os valores são numéricos e arredondar para duas casas decimais
+      valores <- round(as.numeric(unlist(fala_liquida_questionado)), 2)
+      
+      # Formatar os resultados
+      texto_formatado <- sprintf(
+        "Total: %.2f s, com fala exclusiva: %.2f s, correspondendo a %.2f%%.",
+        valores[2], valores[1], valores[3]
+      )
+      
+      texto_formatado
+    })
+    
+    output$tabela_socio <- renderDT({
+      req(resultados_processamento$status)
+      
+      fl_questionado <- gerar_dataframe_textgrid(textgrid)
+      fl_padrao <- gerar_dataframe_textgrid(textgrid_padrao)
+      
+      tabela_fl <- combine_fl(fl_questionado, fl_padrao)
+      
+      datatable(
+        tabela_fl,
+        extensions = c("Buttons"),
+        options = list(
+          dom = 'Bfrtip',
+          searching = FALSE, # Desativa a funcionalidade de busca
+          buttons = list(
+            list(
+              extend = "csv",
+              text = "Salvar como CSV"
+            ),
+            list(
+              extend = "excel",
+              text = "Salvar como XLSX"
+            )
+          ),
+          language = list(
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+          )
+        ),
+        class = "display nowrap compact" # Mantém a tabela ajustada
+      )
+      
+    })
+    
+    output$anova_tabela <- renderDT({
+      req(resultados_processamento$status)
+      
+      # Realizar a PERMANOVA com maior número de permutações
+      permanova_resultado <- adonis2(
+        df_filtrado[, c("f1", "f2")] ~ grupo + vogal + grupo*vogal,
+        data = df_filtrado,
+        method = "euclidean",
+        by = "terms",
+        parallel = 10,
+        permutations = input$num_permutacoes
+      )
+      
+      datatable(
+        as.data.frame(permanova_resultado),
+        extensions = c("Buttons"),
+        options = list(
+          dom = 'Bfrtip',
+          searching = FALSE, # Desativa a funcionalidade de busca
+          buttons = list(
+            list(
+              extend = "csv",
+              text = "Salvar como CSV"
+            ),
+            list(
+              extend = "excel",
+              text = "Salvar como XLSX"
+            )
+          ),
+          language = list(
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+          )
+        ),
+        class = "display nowrap compact" # Mantém a tabela ajustada
+      )
+      
+    })
+    
+    output$hexvogais <- renderPlot({
+      req(resultados_processamento$status)
+      
+      # Calcular as médias de f1 e f2 agrupadas por vogal e grupo
+      df_medias <- df_filtrado %>%
+        group_by(vogal, grupo) %>%
+        summarise(f1_media = mean(f1, na.rm = TRUE),
+                  f2_media = mean(f2, na.rm = TRUE))
+      
+      ggplot() +
+        # Adicionar o hexbin plot, com ajuste do número de bins
+        geom_hex(data = df_filtrado, aes(x = f2, y = f1), bins = 20, alpha = 0.4) +
+        
+        # Alterar a escala de cor do hexbin de branco para amarelo
+        scale_fill_gradient(low = "white", high = "black") +  # Degradê
+        
+        # Adicionar os pontos das médias
+        geom_point(data = df_medias, aes(x = f2_media, y = f1_media, color = grupo, shape = vogal), size = 4) +
+        
+        # Adicionar as linhas conectando os pontos dentro de cada grupo
+        # geom_line(data = df_medias, aes(x = f2_media, y = f1_media, color = grupo, group = grupo, linetype = grupo), size = 1) +
+        
+        # Inverter os eixos
+        scale_x_reverse() +
+        scale_y_reverse() +
+        
+        # Adicionar rótulos e legendas
+        labs(title = "", 
+             x = "f2", 
+             y = "f1", 
+             color = "Grupo", 
+             shape = "Vogal",
+             linetype = "Grupo",
+             fill = "Densidade") +  # Legenda de densidade para o hexbin plot
+        
+        # Estilo minimalista do gráfico
+        theme_minimal() +
+        
+        # Ajustes de tema
+        theme(
+          plot.title = element_text(hjust = 0.5),  # Centralizar o título
+          legend.position = "right"  # Colocar a legenda à direita
+        )
+    })
+    
+    output$boxplotvogaisf1 <- renderPlot({
+      req(resultados_processamento$status)
+      
+      ggplot(df_filtrado, aes(x = vogal, y = f1, fill = grupo)) +
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F1 com grupos lado a lado
+        labs(title = "", x = "Vogal", y = "f1", fill = "Grupo") +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+    })
+    
+    output$boxplotvogaisf2 <- renderPlot({
+      req(resultados_processamento$status)
+      
+      ggplot(df_filtrado, aes(x = vogal, y = f2, fill = grupo)) +
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F1 com grupos lado a lado
+        labs(title = "", x = "Vogal", y = "f2", fill = "Grupo") +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+    })
+    
+    output$histf0 <- renderPlot({
+      req(resultados_processamento$status)
+      
+      # Criando tibbles separados para cada grupo
+      grupo1 <- tibble(value = pitch_combinado$Frequency[pitch_combinado$Origem == unique(pitch_combinado$Origem)[1]])
+      grupo2 <- tibble(value = pitch_combinado$Frequency[pitch_combinado$Origem == unique(pitch_combinado$Origem)[2]])
+      
+      # Calculando bins ótimos
+      bins_grupo1 <- opt_bin(grupo1, value)
+      bins_grupo2 <- opt_bin(grupo2, value)
+      
+      # Usando a média do número de bins dos dois grupos
+      n_bins_otimo <-round(mean(c(nrow(bins_grupo1), nrow(bins_grupo2))))
+      
+      # Criando o histograma com legenda interna
+      ggplot(pitch_combinado, aes(x = Frequency, fill = Origem)) +
+        geom_histogram(aes(y = ..density..), 
+                       position = "identity", 
+                       alpha = 0.5,
+                       bins = n_bins_otimo,
+                       colour = "gray",    
+                       linewidth = 0.2) +   
+        scale_fill_manual(values = c("coral", "lightblue")) +
+        scale_y_continuous(labels = scales::percent) +
+        labs(title = "",
+             x = "Frequência",
+             y = "Densidade") +
+        theme_classic() +
+        theme(panel.grid.major = element_line(color = "gray90", linewidth = 0.2),
+              panel.grid.minor = element_line(color = "gray95", linewidth = 0.1),
+              panel.border = element_rect(color = "black", fill = NA),
+              legend.position = c(0.95, 0.95),          # Posição da legenda (x,y)
+              legend.justification = c(1, 1),           # Alinhamento da legenda
+              legend.background = element_rect(fill = "white", color = "black"),  # Fundo e borda da legenda
+              legend.margin = margin(5, 5, 5, 5))       # Margem interna da legenda
+      
+    })
+    
+    output$anova_pitch <- renderDT({
+      req(resultados_processamento$status)
+      
+      # Realizar a PERMANOVA com maior número de permutações
+      permanova_resultado <- adonis2(
+        pitch_combinado$Frequency ~ pitch_combinado$Origem,
+        data = pitch_combinado,
+        method = "euclidean",
+        by = "terms",
+        parallel = 10,
+        permutations = input$num_permutacoes
+      )
+
+      datatable(
+        as.data.frame(permanova_resultado),
+        extensions = c("Buttons"),
+        options = list(
+          dom = 'Bfrtip',
+          searching = FALSE, # Desativa a funcionalidade de busca
+          buttons = list(
+            list(
+              extend = "csv",
+              text = "Salvar como CSV"
+            ),
+            list(
+              extend = "excel",
+              text = "Salvar como XLSX"
+            )
+          ),
+          language = list(
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+          )
+        ),
+        class = "display nowrap compact" # Mantém a tabela ajustada
+      )
+    })
+    
+    output$anova_posthoc <- renderDT({
+      req(resultados_processamento$status)
+      
+      # Convertendo os fatores para 'factor'
+      pitch_combinado$Origem <- as.factor(pitch_combinado$Origem)
+      
+      # ANOVA não-paramétrica
+      art_pitch <- art(Frequency ~ Origem, data = pitch_combinado)
+      # anova(art_pitch)
+      posthoc_art_pitch <- art.con(art_pitch, "Origem")
+      # summary(posthoc_art_pitch)
+      
+      # Extraindo informações do teste post-hoc
+      comparacoes <- data.frame(summary(posthoc_art_pitch))
+      
+      # Calculando as médias originais por grupo
+      medias_originais <- aggregate(Frequency ~ Origem, data = pitch_combinado, mean)
+      
+      # Criando dataframe com as diferenças nas unidades originais
+      df_comparacoes <- data.frame(
+        Comparacao = paste(comparacoes$contrast),
+        Diferenca = NA,
+        p_valor = comparacoes$p.value
+      )
+      
+      # Preenchendo as diferenças nas unidades originais
+      for(i in 1:nrow(df_comparacoes)) {
+        grupos <- strsplit(as.character(df_comparacoes$Comparacao[i]), " - ")[[1]]
+        media1 <- medias_originais$Frequency[medias_originais$Origem == grupos[1]]
+        media2 <- medias_originais$Frequency[medias_originais$Origem == grupos[2]]
+        df_comparacoes$Diferenca[i] <- media1 - media2
+      }
+      
+      # Arredondando valores e formatando p-valores
+      df_comparacoes$Diferenca <- round(df_comparacoes$Diferenca, 2)
+      df_comparacoes$p_valor <- format.pval(df_comparacoes$p_valor, digits = 3)
+
+      datatable(
+        df_comparacoes,
+        extensions = c("Buttons"),
+        options = list(
+          dom = 'Bfrtip',
+          searching = FALSE, # Desativa a funcionalidade de busca
+          buttons = list(
+            list(
+              extend = "csv",
+              text = "Salvar como CSV"
+            ),
+            list(
+              extend = "excel",
+              text = "Salvar como XLSX"
+            )
+          ),
+          language = list(
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+          )
+        ),
+        class = "display nowrap compact" # Mantém a tabela ajustada
+      )
     })
 
+  #
+  # Verificar se necessário  
+  #  
   observe({
     # Store standard file paths and names
     if (!is.null(input$padrao_formant)) {
