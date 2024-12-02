@@ -1,4 +1,5 @@
 library(ARTool)
+library(boot)
 library(bslib)
 library(dplyr)
 library(DT)
@@ -11,6 +12,7 @@ library(shiny)
 library(shinycssloaders)
 library(shinyFiles)
 library(shinyjs)
+library(stats)
 library(vegan)
 
 

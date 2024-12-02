@@ -112,12 +112,14 @@ ui <- fluidPage(
         ),
         tabPanel(
           "Pitch",
+          # h5("PERM ANOVA"),
+          # withSpinner(DTOutput("anova_pitch")),
+          #h5("Comparações de médias (não-paramétrica)"),
+          #withSpinner(DTOutput("anova_posthoc")),
           h5("Histogramas de f0 por grupo"),
           withSpinner(plotOutput("histf0")),
-          h5("PERM ANOVA"),
-          withSpinner(DTOutput("anova_pitch")),
-          h5("Comparações de médias (não-paramétrica)"),
-          withSpinner(DTOutput("anova_posthoc"))
+          h5("Teste de Kolmogorov para duas amostras"),
+          withSpinner(verbatimTextOutput("f0_ks"))
         )
       )
     )

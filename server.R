@@ -77,6 +77,8 @@ server <- function(input, output, session) {
                                                    "Questionado", 
                                                    "Vozes")
           pitch_combinado <<- rbind(pitch_padrao, pitch_questionado)
+          pitch_combinado$Origem <<- as.factor(pitch_combinado$Origem)
+          
           incProgress(1/n)
           
           resultado_padrao <- processar_formantes(2, formantes_padrao, textgrid_padrao)
@@ -178,7 +180,6 @@ server <- function(input, output, session) {
         ),
         class = "display nowrap compact" # Mantém a tabela ajustada
       )
-      
     })
     
     output$anova_tabela <- renderDT({
@@ -216,7 +217,6 @@ server <- function(input, output, session) {
         ),
         class = "display nowrap compact" # Mantém a tabela ajustada
       )
-      
     })
     
     output$hexvogais <- renderPlot({
@@ -284,6 +284,10 @@ server <- function(input, output, session) {
         theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
     })
     
+
+
+    
+    
     output$histf0 <- renderPlot({
       req(resultados_processamento$status)
       
@@ -296,13 +300,17 @@ server <- function(input, output, session) {
       bins_grupo2 <- opt_bin(grupo2, value)
       
       # Usando a média do número de bins dos dois grupos
-      n_bins_otimo <-round(mean(c(nrow(bins_grupo1), nrow(bins_grupo2))))
+      n_bins_otimo <- round(mean(c(nrow(bins_grupo1), nrow(bins_grupo2))))
       
-      # Criando o histograma com legenda interna
+      # Calculando as médias
+      media_grupo1 <- mean(grupo1$value, na.rm = TRUE)
+      media_grupo2 <- mean(grupo2$value, na.rm = TRUE)
+      
+      # Criando o histograma com linhas de média e anotações
       ggplot(pitch_combinado, aes(x = Frequency, fill = Origem)) +
         geom_histogram(aes(y = ..density..), 
-                       position = "identity", 
-                       alpha = 0.5,
+                       position = "identity",  # Manter sobreposição transparente
+                       alpha = 0.5,            # Transparência para distinguir os grupos
                        bins = n_bins_otimo,
                        colour = "gray",    
                        linewidth = 0.2) +   
@@ -311,6 +319,14 @@ server <- function(input, output, session) {
         labs(title = "",
              x = "Frequência",
              y = "Densidade") +
+        # Adicionando as linhas pontilhadas para as médias
+        geom_vline(xintercept = media_grupo1, linetype = "dotted", color = "coral", linewidth = 0.8) +
+        geom_vline(xintercept = media_grupo2, linetype = "dotted", color = "lightblue", linewidth = 0.8) +
+        # Adicionando os valores das médias como texto abaixo do eixo x
+        annotate("text", x = media_grupo1, y = -0.0025, label = sprintf("%.1f", media_grupo1),
+                 color = "coral", vjust = 1, hjust = 0.5, size = 3) +
+        annotate("text", x = media_grupo2, y = -0.0025, label = sprintf("%.1f", media_grupo2),
+                 color = "lightblue", vjust = 1, hjust = 0.5, size = 3) +
         theme_classic() +
         theme(panel.grid.major = element_line(color = "gray90", linewidth = 0.2),
               panel.grid.minor = element_line(color = "gray95", linewidth = 0.1),
@@ -319,8 +335,25 @@ server <- function(input, output, session) {
               legend.justification = c(1, 1),           # Alinhamento da legenda
               legend.background = element_rect(fill = "white", color = "black"),  # Fundo e borda da legenda
               legend.margin = margin(5, 5, 5, 5))       # Margem interna da legenda
-      
     })
+    
+    output$f0_ks <- renderText({
+      # Separando os dados por grupo
+      grupo1 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[1]]
+      grupo2 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[2]]
+      
+      # Realizando o teste KS
+      resultado_ks <- ks.test(grupo1, grupo2)
+      
+      paste("Teste de Kolmogorov-Smirnov para duas amostras:",
+            "\nEstatística D =", round(resultado_ks$statistic, 4),
+            "\nValor-p =", round(resultado_ks$p.value, digits = 4))
+    })
+    
+    
+    
+    
+    
     
     output$anova_pitch <- renderDT({
       req(resultados_processamento$status)
@@ -361,10 +394,7 @@ server <- function(input, output, session) {
     
     output$anova_posthoc <- renderDT({
       req(resultados_processamento$status)
-      
-      # Convertendo os fatores para 'factor'
-      pitch_combinado$Origem <- as.factor(pitch_combinado$Origem)
-      
+
       # ANOVA não-paramétrica
       art_pitch <- art(Frequency ~ Origem, data = pitch_combinado)
       # anova(art_pitch)
