@@ -171,6 +171,20 @@ server <- function(input, output, session) {
               text = "Salvar como CSV",
               exportOptions = list(
                 modifier = list(page = "all") # Exporta todas as páginas
+              ),
+              customize = JS(
+                "function(csv) {",
+                "  var data = csv.replace(/\"/g, '');", # Remove aspas dos textos
+                "  var blob = new Blob([data], { type: 'text/csv;charset=utf-8;' });",
+                "  var url = URL.createObjectURL(blob);",
+                "  var a = document.createElement('a');",
+                "  a.href = url;",
+                "  a.download = 'dados.csv';", # Nome do arquivo de saída
+                "  document.body.appendChild(a);",
+                "  a.click();",
+                "  document.body.removeChild(a);",
+                "  return false;",
+                "}"
               )
             ),
             list(
@@ -200,8 +214,8 @@ server <- function(input, output, session) {
         rownames = FALSE, # Remove números das linhas
         class = "display compact"
       )
+      
     })
-    
     
     
     
