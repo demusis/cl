@@ -163,24 +163,48 @@ server <- function(input, output, session) {
         extensions = c("Buttons"),
         options = list(
           dom = 'Bfrtip',
-          searching = FALSE, # Desativa a funcionalidade de busca
+          searching = FALSE,
+          paging = FALSE, # Desabilita paginação para mostrar todas as linhas
           buttons = list(
             list(
               extend = "csv",
-              text = "Salvar como CSV"
+              text = "Salvar como CSV",
+              exportOptions = list(
+                modifier = list(page = "all") # Exporta todas as páginas
+              )
             ),
             list(
               extend = "excel",
-              text = "Salvar como XLSX"
+              text = "Salvar como XLSX",
+              exportOptions = list(
+                modifier = list(page = "all") # Exporta todas as páginas
+              )
             )
           ),
           language = list(
-            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json'
+          ),
+          scrollX = TRUE, # Habilita rolagem horizontal
+          autoWidth = TRUE, # Ajusta automaticamente a largura das colunas
+          columnDefs = list(
+            list(
+              targets = "_all",
+              render = JS(
+                "function(data, type, row, meta) {",
+                "  return type === 'export' ? data : '<div style=\"white-space: normal;\">' + data + '</div>';",
+                "}"
+              )
+            )
           )
         ),
-        class = "display nowrap compact" # Mantém a tabela ajustada
+        rownames = FALSE, # Remove números das linhas
+        class = "display compact"
       )
     })
+    
+    
+    
+    
     
     output$anova_tabela <- renderDT({
       req(resultados_processamento$status)
