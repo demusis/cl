@@ -1,4 +1,4 @@
-# Aplicação Shiny: Análise Estatística de Arquivos do Praat
+# Análise Estatística de Arquivos do Praat
 
 ## Descrição
 Esta aplicação Shiny permite realizar análises estatísticas de arquivos gerados pelo software **Praat**, com foco em **comparações de locutores**. Entre as análises disponíveis estão:
@@ -16,7 +16,7 @@ Esta aplicação Shiny permite realizar análises estatísticas de arquivos gera
 ## Requisitos
 Antes de usar a aplicação, certifique-se de ter:
 - **R** instalado em sua máquina;
-- O pacote **Shiny** e outros pacotes adicionais listados abaixo:
+- Os pacotes listados abaixo:
   - `shiny`
   - `shinyjs`
   - `ggplot2`
