@@ -3,9 +3,9 @@
 ## Descrição
 Esta aplicação Shiny permite realizar análises estatísticas de arquivos gerados pelo software **Praat**, com foco em **comparações de locutores**. Entre as análises disponíveis estão:
 - Cálculo de estatísticas descritivas sobre os dados de fala;
-- Gráficos de dispersão, boxplots e histogramas baseados em formantes (f1, f2) e pitch (f0);
+- Gráficos de dispersão, boxplots e histogramas baseados em formantes (f1, f2) e frequência fundamental (f0);
 - Testes estatísticos como PERMANOVA e Kolmogorov-Smirnov;
-- Geração de tabelas detalhadas para análise.
+- Geração de tabelas para análise.
 
 ## Funcionalidades
 - **Uploads de arquivos:** Aceita arquivos `.FORMANT`, `.TEXTGRID` e `.PITCHTIER` do Praat para dois grupos: *Padrão* e *Questionado*.
