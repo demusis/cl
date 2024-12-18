@@ -31,3 +31,9 @@ Você pode instalar todos os pacotes necessários com o seguinte comando no R:
 
 ```R
 install.packages(c("shiny", "shinyjs", "ggplot2", "dplyr", "DT", "vegan", "shinyWidgets", "shinycssloaders", "ggthemes"))
+```
+
+## Guia de Uso
+Para facilitar o uso da aplicação, foram criados dois vídeos explicativos que demonstram como operar as principais funcionalidades:
+- **Parte 1:** [Introdução e upload de arquivos](https://youtu.be/ykZdsxOYN3Y)
+- **Parte 2:** [Configuração de análises e exportação de resultados](https://youtu.be/sbpgxEptWVU)
