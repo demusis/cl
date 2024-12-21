@@ -1,7 +1,7 @@
 ui <- fluidPage(
   useShinyjs(),
   theme = theme,
-  titlePanel("Análise estatístisca de arquivos do Praat para comparação de locutor"),
+  titlePanel("Análise estatístisca de arquivos do Praat para comparação de locutor v. 0.03"),
   sidebarLayout(
     sidebarPanel(
       width = 3,
@@ -60,6 +60,19 @@ ui <- fluidPage(
           value = "VM1.1",
           placeholder = "Digite um identificador"
         ),
+        sliderInput("num_formantes",
+                    "Número de formantes:",
+                    min = 2,
+                    max = 5,
+                    value = 2,
+                    step = 1
+        ),
+        radioButtons("remover_outliers",
+                     "Remover outliers?",
+                     choices = c("Sim" = "sim", "Não" = "nao"),
+                     selected = "nao",
+                     inline = TRUE
+        ),
         sliderInput("num_permutacoes",
                     "Número de permutações:",
                     min = 10,
@@ -101,24 +114,28 @@ ui <- fluidPage(
         ),
         tabPanel(
           "Formantes",
-          h5("PERM ANOVA"),
+          h5("PERMANOVA: (f1, f2, ... fn) ~ Grupo + Vogal + Grupo * Vogal"),
           withSpinner(DTOutput("anova_tabela")),
+          h5("PERMDISP"),
+          withSpinner(plotOutput("permdisp")),
           h5("Gráfico de dispersão por formantes (f1 e f2), vogais selecionadas e grupo"),
           withSpinner(plotOutput("hexvogais")),
-          h5("Box-plot de f1 por vogais selecionadas e grupo"),
+          h5("Box-plots dos formantes por vogais selecionadas e grupos"),
           withSpinner(plotOutput("boxplotvogaisf1")),
-          h5("Box-plot de f2 por vogais selecionadas e grupo"),
-          withSpinner(plotOutput("boxplotvogaisf2"))
+          withSpinner(plotOutput("boxplotvogaisf2")),
+          withSpinner(plotOutput("boxplotvogaisf3")),
+          withSpinner(plotOutput("boxplotvogaisf4")),
+          withSpinner(plotOutput("boxplotvogaisf5")),
         ),
         tabPanel(
-          "Pitch",
-          # h5("PERM ANOVA"),
+          "Frequência fundamental (f0)",
+          # h5("ANOVA"),
           # withSpinner(DTOutput("anova_pitch")),
           #h5("Comparações de médias (não-paramétrica)"),
           #withSpinner(DTOutput("anova_posthoc")),
           h5("Histogramas de f0 por grupo"),
           withSpinner(plotOutput("histf0")),
-          h5("Teste de Kolmogorov para duas amostras"),
+          # h5("Teste de Kolmogorov-Smirnov para duas amostras"),
           withSpinner(verbatimTextOutput("f0_ks"))
         )
       )

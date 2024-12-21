@@ -6,6 +6,7 @@ library(DT)
 library(ggplot2)
 library(healthyR)
 library(mvoutlier)
+library(parallel)
 library(robustbase)
 library(rPraat)
 library(shiny)
@@ -34,7 +35,7 @@ options(mc_doScale_quiet = TRUE)
 # ----------------------------------------------------------------------------
 
 # Função para converter PitchTier em DataFrame e filtrar por presença ou ausência de um valor específico em uma tier
-pitchtier_dataframe <- function(textgrid, arquivo, origem, tier_nome, valor_tier = "", filtrar_presenca = FALSE) {
+pitchtier_dataframe <- function(textgrid, arquivo, origem, tier_nome, valor_tier = "", filtrar_presenca = FALSE, outlier = FALSE) {
   # Ler o arquivo de PitchTier
   pitchTier <- pt.read(arquivo, encoding = "auto")
   
@@ -102,8 +103,10 @@ pitchtier_dataframe <- function(textgrid, arquivo, origem, tier_nome, valor_tier
     data_filtrado$Frequency >= outlier_limites[1] & 
       data_filtrado$Frequency <= outlier_limites[2], 
   ]
-  
-  return(data_sem_outliers)
+  if (outlier) {
+  return(data_sem_outliers) } else {
+    return(data_filtrado)  
+  }
 }
 
 # ----------------------------------------------------------------------------
@@ -261,25 +264,46 @@ combine_fl <- function(df1, df2) {
 # ----------------------------------------------------------------------------
 
 filtrar_outliers <- function(max_formantes, dados_formantes_total, nivel_confianca = 0.975) {
-  # print(dados_formantes_total)
-  
-  # Selecionar apenas as colunas dos formantes para calcular a distância de Mahalanobis
-  # formantes_data <- dados_formantes_total[, grep("^f", names(dados_formantes_total))]
-  
   # Selecionar apenas as colunas dos formantes até o limite definido por max_formantes
-  formantes_data <- dados_formantes_total[, grep(paste0("^f[1-", max_formantes, "]$"), 
-                                                 names(dados_formantes_total))]
+  formantes_data <- dados_formantes_total[, grep(paste0("^f[1-", max_formantes, "]$"), names(dados_formantes_total))]
   
-  # Detectar outliers multivariados usando a distância de Mahalanobis robusta
-  result <- aq.plot(formantes_data)
+  # Substituir NAs por zeros (ou outro valor apropriado, dependendo do contexto)
+  formantes_data[is.na(formantes_data)] <- 0
+  
+  # Validar o conjunto de dados antes de executar aq.plot
+  if (nrow(formantes_data) < 2 || ncol(formantes_data) < 2) {
+    showNotification("Dados insuficientes para análise de outliers. Nenhum dado foi removido.", type = "warning", duration = 5)
+    dados_formantes_total$outlier <- FALSE
+    return(dados_formantes_total)
+  }
+  
+  # Capturar erros ao usar aq.plot
+  result <- tryCatch({
+    # showNotification("Calculando outliers com aq.plot...", type = "message", duration = 3)
+    aq.plot(formantes_data)
+  }, error = function(e) {
+    showNotification(paste("Erro ao calcular outliers:", e$message), type = "error", duration = 5)
+    NULL
+  })
+  
+  # Verificar se aq.plot falhou
+  if (is.null(result)) {
+    showNotification("Nenhum dado foi removido devido a erro no cálculo de outliers.", type = "warning", duration = 5)
+    dados_formantes_total$outlier <- FALSE
+    return(dados_formantes_total)
+  }
   
   # Adicionar a coluna de outliers ao dataframe original
   dados_formantes_total$outlier <- result$outliers
   
+  # Filtrar dados sem outliers
   dados_sem_outliers <- dados_formantes_total[dados_formantes_total$outlier == FALSE, ]
+  
+  # showNotification("Filtragem de outliers concluída com sucesso.", type = "message", duration = 3)
   
   return(dados_sem_outliers)
 }
+
 
 # ----------------------------------------------------------------------------
 
@@ -322,7 +346,7 @@ vogal_formantes <- function(vogal, textgrid_palavra_df, formantes_df) {
 
 # ----------------------------------------------------------------------------
 
-processar_formantes <- function(max_formantes, formantes, textgrid) {
+processar_formantes <- function(outliers, max_formantes, formantes, textgrid) {
   # Criar dinamicamente um data frame a partir dos dados de formantes
   dados_formantes <- data.frame(tempo = formantes$t)
   
@@ -332,14 +356,14 @@ processar_formantes <- function(max_formantes, formantes, textgrid) {
     dados_formantes[[col_name]] <- formantes$frequencyArray[i, ]
   }
   
-  dados_formantes[, c("f1", "f2", "f3", "f4", "f5")] <- t(apply(dados_formantes[, c("f1", "f2", "f3", "f4", "f5")], 1, function(x) {
+  formantes_cols <- paste0("f", 1:max_formantes)
+  dados_formantes[, formantes_cols] <- t(apply(dados_formantes[, formantes_cols], 1, function(x) {
     # Ordena os valores ignorando NAs
     sorted <- sort(x, na.last = TRUE)
     return(sorted)
   }))
   
   # Identifica dinamicamente as colunas a serem utilizadas e exclui as demais
-  formantes_cols <- paste0("f", 1:max_formantes)
   dados_formantes <- dados_formantes[,c("tempo", formantes_cols)]
   
   # Converter a tier Palavra do TextGrid em um data frame
@@ -359,9 +383,14 @@ processar_formantes <- function(max_formantes, formantes, textgrid) {
     dados_formantes_vogal <- vogal_formantes(vogal, textgrid_palavra_df, dados_formantes)
     
     # Remove outliers
-    dados_sem_outliers <- filtrar_outliers(max_formantes,
-                                           dados_formantes_vogal, 
-                                           nivel_confianca = 0.975)
+    if (outliers=="sim") {
+      dados_sem_outliers <- filtrar_outliers(max_formantes,
+                                             dados_formantes_vogal, 
+                                             nivel_confianca = 0.975)  
+    } else {
+      dados_sem_outliers <- dados_formantes_vogal
+      dados_sem_outliers$outlier <- FALSE
+    }
     
     # Calcula as médias dos formantes para cada instância da vogal
     medias_vogal <- calcular_medias_por_instancia(dados_sem_outliers)

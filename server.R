@@ -69,22 +69,25 @@ server <- function(input, output, session) {
           pitch_padrao <<- pitchtier_dataframe(textgrid_padrao, 
                                               input$padrao_pitchtier$datapath, 
                                               "Padrão", 
-                                              "Vozes")
+                                              "Vozes",
+                                              outlier = (input$remover_outliers == 'sim'))
           incProgress(1/n)
           
           pitch_questionado <<- pitchtier_dataframe(textgrid,
                                                    input$quest_pitchtier$datapath, 
                                                    "Questionado", 
-                                                   "Vozes")
+                                                   "Vozes",
+                                                   outlier = (input$remover_outliers == 'sim'))
+                                                   
           pitch_combinado <<- rbind(pitch_padrao, pitch_questionado)
           pitch_combinado$Origem <<- as.factor(pitch_combinado$Origem)
           
           incProgress(1/n)
           
-          resultado_padrao <- processar_formantes(2, formantes_padrao, textgrid_padrao)
+          resultado_padrao <- processar_formantes(input$remover_outliers, input$num_formantes, formantes_padrao, textgrid_padrao)
           dados_vogais_sem_outliers_padrao <- resultado_padrao$dados_vogais_sem_outliers
           
-          resultado <- processar_formantes(2, formantes, textgrid)
+          resultado <- processar_formantes(input$remover_outliers, input$num_formantes, formantes, textgrid)
           dados_vogais_sem_outliers <- resultado$dados_vogais_sem_outliers
           incProgress(1/n)
           
@@ -217,28 +220,57 @@ server <- function(input, output, session) {
       
     })
     
-    
-    
-    
     output$anova_tabela <- renderDT({
       req(resultados_processamento$status)
       
-      # Realizar a PERMANOVA com maior número de permutações
-      permanova_resultado <- adonis2(
-        df_filtrado[, c("f1", "f2")] ~ grupo + vogal + grupo*vogal,
-        data = df_filtrado,
-        method = "euclidean",
-        by = "terms",
-        parallel = 10,
-        permutations = input$num_permutacoes
-      )
+      # Capturar erros durante a execução da PERMANOVA
+      # Filtrar os nomes das colunas que começam com "f"
+      colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
+      
+      permanova_resultado <- tryCatch({
+        adonis2(
+          df_filtrado[, colunas_com_f] ~ grupo + vogal + grupo * vogal,
+          data = df_filtrado,
+          method = "euclidean",
+          by = "terms",
+          parallel = parallel::detectCores() - 1,
+          permutations = input$num_permutacoes
+        )
+      }, error = function(e) {
+        # Exibe notificação visível no caso de erro
+        showNotification("Erro ao calcular PERMANOVA: verifique os dados e parâmetros.", type = "error")
+        NULL
+      })
+      
+      # Caso a execução falhe, exibir uma tabela vazia
+      if (is.null(permanova_resultado)) {
+        return(DT::datatable(data.frame(Mensagem = "Erro ao calcular PERMANOVA. 
+                                                    Verifique se para todos os grupos 
+                                                    tem repetições ou se as variâncias 
+                                                    são diferentes de zero."), 
+                             options = list(dom = "t"), 
+                             class = "display compact"))
+      }
+      
+      # Renderizar os resultados da PERMANOVA
+      
+      resultado_formatado <- as.data.frame(permanova_resultado)
+      resultado_formatado[] <- lapply(resultado_formatado, function(coluna) {
+        if (is.numeric(coluna)) {
+          coluna <- formatC(coluna, width = 5, digits = 3, format = "fg", drop0trailing = FALSE)
+        }
+      })
+      resultado_formatado[5,5] <- ""
+      resultado_formatado[4,4] <- ""
+      resultado_formatado[5,4] <- ""
+      resultado_formatado[4,5] <- ""
       
       datatable(
-        as.data.frame(permanova_resultado),
+        resultado_formatado,
         extensions = c("Buttons"),
         options = list(
           dom = 'Bfrtip',
-          searching = FALSE, # Desativa a funcionalidade de busca
+          searching = FALSE,
           buttons = list(
             list(
               extend = "csv",
@@ -250,11 +282,36 @@ server <- function(input, output, session) {
             )
           ),
           language = list(
-            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json'
           )
         ),
-        class = "display nowrap compact" # Mantém a tabela ajustada
+        class = "display nowrap compact"
       )
+      
+    })
+    
+    output$permdisp <- renderPlot({
+      req(resultados_processamento$status)
+      df_filtrado$grupo <- as.factor(df_filtrado$grupo)
+      
+      # Filtrar os nomes das colunas que começam com "f"
+      colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
+      
+      # Realiza a análise de dispersão multivariada (PERMDISP)
+      distancias <- dist(df_filtrado[, colunas_com_f], method = "euclidean") # Calcula a matriz de distâncias
+      disp <- betadisper(distancias, df_filtrado$grupo) # Calcula a dispersão para os grupos
+      
+      # Avaliação da dispersão com permutação
+      # anova_disp <- permutest(disp, permutations = input$num_permutacoes)
+      
+      # Resultados
+      plot(disp, label = FALSE, main = "")
+      legend("topright",
+             legend = levels(df_filtrado$grupo),
+             col = 1:length(levels(df_filtrado$grupo)),
+             pch = 19,
+             title = "Grupos")
+      
     })
     
     output$hexvogais <- renderPlot({
@@ -316,15 +373,46 @@ server <- function(input, output, session) {
       req(resultados_processamento$status)
       
       ggplot(df_filtrado, aes(x = vogal, y = f2, fill = grupo)) +
-        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  # Boxplot para F1 com grupos lado a lado
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  
         labs(title = "", x = "Vogal", y = "f2", fill = "Grupo") +
         theme_minimal() +
         theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
     })
     
-
-
+    output$boxplotvogaisf3 <- renderPlot({
+      req(resultados_processamento$status)
+      req(input$num_formantes>=3)
+      
+      ggplot(df_filtrado, aes(x = vogal, y = f3, fill = grupo)) +
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  
+        labs(title = "", x = "Vogal", y = "f3", fill = "Grupo") +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+    })
     
+    output$boxplotvogaisf4 <- renderPlot({
+      req(resultados_processamento$status)
+      req(input$num_formantes>=4)
+      
+      ggplot(df_filtrado, aes(x = vogal, y = f4, fill = grupo)) +
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  
+        labs(title = "", x = "Vogal", y = "f4", fill = "Grupo") +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+    })
+    
+    output$boxplotvogaisf5 <- renderPlot({
+      req(resultados_processamento$status)
+      req(input$num_formantes==5)
+      
+      ggplot(df_filtrado, aes(x = vogal, y = f5, fill = grupo)) +
+        geom_boxplot(alpha = 0.6, position = position_dodge(0.8)) +  
+        labs(title = "", x = "Vogal", y = "f5", fill = "Grupo") +
+        theme_minimal() +
+        theme(plot.title = element_text(hjust = 0.5))  # Centralizar o título
+    })
+    
+
     
     output$histf0 <- renderPlot({
       req(resultados_processamento$status)
@@ -344,6 +432,25 @@ server <- function(input, output, session) {
       media_grupo1 <- mean(grupo1$value, na.rm = TRUE)
       media_grupo2 <- mean(grupo2$value, na.rm = TRUE)
       
+      # Criando densidades para calcular a área de interseção
+      densidade_grupo1 <- density(grupo1$value, n = 512)
+      densidade_grupo2 <- density(grupo2$value, n = 512)
+      
+      # Interpolação linear para calcular a sobreposição
+      x_comum <- seq(min(densidade_grupo1$x, densidade_grupo2$x), 
+                     max(densidade_grupo1$x, densidade_grupo2$x), length.out = 512)
+      densidade1_interp <- approx(densidade_grupo1$x, densidade_grupo1$y, x_comum)$y
+      densidade2_interp <- approx(densidade_grupo2$x, densidade_grupo2$y, x_comum)$y
+      
+      # Substituindo valores NA por 0 nas densidades interpoladas
+      densidade1_interp[is.na(densidade1_interp)] <- 0
+      densidade2_interp[is.na(densidade2_interp)] <- 0
+      
+      # Calculando a área de interseção
+      area_intersecao <- sum(pmin(densidade1_interp, densidade2_interp)) * diff(x_comum[1:2])
+      area_intersecao_percent <- area_intersecao * 100  # Convertendo para porcentagem
+      
+      
       # Criando o histograma com linhas de média e anotações
       ggplot(pitch_combinado, aes(x = Frequency, fill = Origem)) +
         geom_histogram(aes(y = ..density..), 
@@ -361,10 +468,14 @@ server <- function(input, output, session) {
         geom_vline(xintercept = media_grupo1, linetype = "dotted", color = "coral", linewidth = 0.8) +
         geom_vline(xintercept = media_grupo2, linetype = "dotted", color = "lightblue", linewidth = 0.8) +
         # Adicionando os valores das médias como texto abaixo do eixo x
-        annotate("text", x = media_grupo1, y = -0.0025, label = sprintf("%.1f", media_grupo1),
-                 color = "coral", vjust = 1, hjust = 0.5, size = 3) +
-        annotate("text", x = media_grupo2, y = -0.0025, label = sprintf("%.1f", media_grupo2),
-                 color = "lightblue", vjust = 1, hjust = 0.5, size = 3) +
+        annotate("text", x = media_grupo1, y = -0.0015, label = sprintf("%.1f", media_grupo1),
+                 color = "coral", vjust = 1, hjust = 0.5, size = 5) +
+        annotate("text", x = media_grupo2, y = -0.0005, label = sprintf("%.1f", media_grupo2),
+                 color = "lightblue", vjust = 1, hjust = 0.5, size = 5) +
+        # Adicionando o valor da área de interseção no gráfico
+        annotate("text", x = mean(c(media_grupo1, media_grupo2)), y = 0.013, 
+                 label = sprintf("Área de interseção: %.1f%%", area_intersecao_percent),
+                 color = "black", vjust = 1, hjust = 0.5, size = 5, fontface = "bold") +
         theme_classic() +
         theme(panel.grid.major = element_line(color = "gray90", linewidth = 0.2),
               panel.grid.minor = element_line(color = "gray95", linewidth = 0.1),
@@ -375,60 +486,69 @@ server <- function(input, output, session) {
               legend.margin = margin(5, 5, 5, 5))       # Margem interna da legenda
     })
     
+    
     output$f0_ks <- renderText({
-      # Separando os dados por grupo
-      grupo1 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[1]]
-      grupo2 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[2]]
+      # Capturar mensagens de erro ou sucesso
+      resultado <- tryCatch({
+        # Separando os dados por grupo
+        grupo1 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[1]]
+        grupo2 <- pitch_combinado$Frequency[pitch_combinado$Origem == levels(pitch_combinado$Origem)[2]]
+        
+        # Realizando o teste KS
+        resultado_ks <- ks.test(grupo1, grupo2)
+        
+        # Retorna a mensagem formatada
+        paste("Teste de Kolmogorov-Smirnov para duas amostras:",
+              "\nEstatística D =", round(resultado_ks$statistic, 4),
+              "\nValor-p =", round(resultado_ks$p.value, digits = 4))
+      }, error = function(e) {
+        # Captura o erro e mostra uma notificação
+        showNotification(paste("Erro ao executar o teste KS:", e$message), type = "error")
+        
+        # Mensagem de erro que será exibida no renderText
+        "Erro ao executar o teste KS. Verifique os dados."
+      })
       
-      # Realizando o teste KS
-      resultado_ks <- ks.test(grupo1, grupo2)
-      
-      paste("Teste de Kolmogorov-Smirnov para duas amostras:",
-            "\nEstatística D =", round(resultado_ks$statistic, 4),
-            "\nValor-p =", round(resultado_ks$p.value, digits = 4))
+      # Retorna o resultado, seja ele sucesso ou mensagem de erro
+      resultado
     })
     
-    
-    
-    
-    
-    
-    output$anova_pitch <- renderDT({
-      req(resultados_processamento$status)
-      
-      # Realizar a PERMANOVA com maior número de permutações
-      permanova_resultado <- adonis2(
-        pitch_combinado$Frequency ~ pitch_combinado$Origem,
-        data = pitch_combinado,
-        method = "euclidean",
-        by = "terms",
-        parallel = 10,
-        permutations = input$num_permutacoes
-      )
-
-      datatable(
-        as.data.frame(permanova_resultado),
-        extensions = c("Buttons"),
-        options = list(
-          dom = 'Bfrtip',
-          searching = FALSE, # Desativa a funcionalidade de busca
-          buttons = list(
-            list(
-              extend = "csv",
-              text = "Salvar como CSV"
-            ),
-            list(
-              extend = "excel",
-              text = "Salvar como XLSX"
-            )
-          ),
-          language = list(
-            url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
-          )
-        ),
-        class = "display nowrap compact" # Mantém a tabela ajustada
-      )
-    })
+    # output$anova_pitch <- renderDT({
+    #   req(resultados_processamento$status)
+    #   
+    #   # Realizar a PERMANOVA com maior número de permutações
+    #   permanova_resultado <- adonis2(
+    #     pitch_combinado$Frequency ~ pitch_combinado$Origem,
+    #     data = pitch_combinado,
+    #     method = "euclidean",
+    #     by = "terms",
+    #     parallel = 10,
+    #     permutations = input$num_permutacoes
+    #   )
+    # 
+    #   datatable(
+    #     as.data.frame(permanova_resultado),
+    #     extensions = c("Buttons"),
+    #     options = list(
+    #       dom = 'Bfrtip',
+    #       searching = FALSE, # Desativa a funcionalidade de busca
+    #       buttons = list(
+    #         list(
+    #           extend = "csv",
+    #           text = "Salvar como CSV"
+    #         ),
+    #         list(
+    #           extend = "excel",
+    #           text = "Salvar como XLSX"
+    #         )
+    #       ),
+    #       language = list(
+    #         url = 'https://cdn.datatables.net/plug-ins/1.13.5/i18n/pt-BR.json' # Tradução para português
+    #       )
+    #     ),
+    #     class = "display nowrap compact" # Mantém a tabela ajustada
+    #   )
+    # })
     
     output$anova_posthoc <- renderDT({
       req(resultados_processamento$status)
