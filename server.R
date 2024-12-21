@@ -1,3 +1,7 @@
+# Análise estatístisca de arquivos do Praat para comparação de locutor 
+# v. 0.03
+# Autor: Carlo Ralph De Musis
+
 server <- function(input, output, session) {
   options(shiny.maxRequestSize = -1)  # Desativa limite de upload
 

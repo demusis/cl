@@ -1,3 +1,7 @@
+# Análise estatístisca de arquivos do Praat para comparação de locutor 
+# v. 0.03
+# Autor: Carlo Ralph De Musis
+
 library(ARTool)
 library(boot)
 library(bslib)

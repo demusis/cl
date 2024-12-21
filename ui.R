@@ -1,3 +1,7 @@
+# Análise estatístisca de arquivos do Praat para comparação de locutor 
+# v. 0.03
+# Autor: Carlo Ralph De Musis
+
 ui <- fluidPage(
   useShinyjs(),
   theme = theme,
@@ -133,7 +137,7 @@ ui <- fluidPage(
           # withSpinner(DTOutput("anova_pitch")),
           #h5("Comparações de médias (não-paramétrica)"),
           #withSpinner(DTOutput("anova_posthoc")),
-          h5("Histogramas de f0 por grupo"),
+          h5("Histogramas por grupo"),
           withSpinner(plotOutput("histf0")),
           # h5("Teste de Kolmogorov-Smirnov para duas amostras"),
           withSpinner(verbatimTextOutput("f0_ks"))
