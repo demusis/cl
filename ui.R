@@ -122,6 +122,7 @@ ui <- fluidPage(
           withSpinner(DTOutput("anova_tabela")),
           h5("PERMDISP"),
           withSpinner(plotOutput("permdisp")),
+          withSpinner(verbatimTextOutput("permdisp_res")),
           h5("Gráfico de dispersão por formantes (f1 e f2), vogais selecionadas e grupo"),
           withSpinner(plotOutput("hexvogais")),
           h5("Box-plots dos formantes por vogais selecionadas e grupos"),

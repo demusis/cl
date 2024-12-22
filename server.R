@@ -294,28 +294,81 @@ server <- function(input, output, session) {
       
     })
     
+
+    
+    
+    
+    
+    
     output$permdisp <- renderPlot({
       req(resultados_processamento$status)
+      
       df_filtrado$grupo <- as.factor(df_filtrado$grupo)
+      df_filtrado$vogal <- as.factor(df_filtrado$vogal)
+      
+      # Colunas acústicas
+      colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
+      distancias <- dist(df_filtrado[, colunas_com_f], method = "euclidean")
+      
+      # Fator interação só para a análise (se quiser)
+      df_filtrado$grupo_vogais <- interaction(df_filtrado$grupo, df_filtrado$vogal, sep = " - ")
+      disp_interacao <- betadisper(distancias, df_filtrado$grupo_vogais)
+      
+      grupos <- levels(disp_interacao$group)
+      n_grupos <- length(grupos)
+      
+      # Cores alternadas: "cyan" e "tomato"
+      cores <- rep(c("cyan", "tomato"), length.out = n_grupos)
+      
+      n_symbols <- ceiling(n_grupos / 2)
+      base_symbols <- 15 + seq_len(n_symbols)
+      
+      simbolos <- sapply(
+        seq_len(n_grupos),
+        function(i) base_symbols[floor((i - 1)/2) + 1]
+      )
+      
+      # Plot com cores diferentes para cada grupo
+      plot(disp_interacao,
+        label   = FALSE,
+        main    = "",
+        # ellipse = FALSE,
+        hull    = TRUE,
+        conf    = 0.95,
+        col     = cores
+      )
+      
+      # Adiciona a legenda dos grupos
+      legend(
+        "topleft",
+        legend = grupos,
+        col    = cores,
+        pch    = simbolos,
+        ncol = 2
+      )
+    })
+    
+    
+    
+    output$permdisp_res <- renderText({
+      req(resultados_processamento$status)
+      df_filtrado$grupo <- as.factor(df_filtrado$grupo)
+      df_filtrado$vogal <- as.factor(df_filtrado$vogal)
       
       # Filtrar os nomes das colunas que começam com "f"
       colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
       
       # Realiza a análise de dispersão multivariada (PERMDISP)
       distancias <- dist(df_filtrado[, colunas_com_f], method = "euclidean") # Calcula a matriz de distâncias
-      disp <- betadisper(distancias, df_filtrado$grupo) # Calcula a dispersão para os grupos
       
-      # Avaliação da dispersão com permutação
-      # anova_disp <- permutest(disp, permutations = input$num_permutacoes)
+      df_filtrado$grupo_vogais <- interaction(df_filtrado$grupo, df_filtrado$vogal)
+      disp_interacao <- betadisper(distancias, df_filtrado$grupo_vogais)
+      resultado_interacao <- permutest(disp_interacao, permutations = input$num_permutacoes)
       
-      # Resultados
-      plot(disp, label = FALSE, main = "")
-      legend("topright",
-             legend = levels(df_filtrado$grupo),
-             col = 1:length(levels(df_filtrado$grupo)),
-             pch = 19,
-             title = "Grupos")
+      linhas_saida <- capture.output(resultado_interacao)
+      saida_formatada <- paste(linhas_saida, collapse = "\n")
       
+      saida_formatada
     })
     
     output$hexvogais <- renderPlot({
