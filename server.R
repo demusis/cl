@@ -1,5 +1,5 @@
 # Análise estatístisca de arquivos do Praat para comparação de locutor 
-# v. 0.03
+# v. 0.031
 # Autor: Carlo Ralph De Musis
 
 server <- function(input, output, session) {
@@ -224,17 +224,35 @@ server <- function(input, output, session) {
       
     })
     
+    
+    
+    
     output$anova_tabela <- renderDT({
       req(resultados_processamento$status)
-      
-      # Capturar erros durante a execução da PERMANOVA
+
       # Filtrar os nomes das colunas que começam com "f"
-      colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
+      num_formantes <- input$num_formantes  # Número de formantes selecionados pelo usuário
+      
+      # Criar uma sequência de nomes de colunas do tipo f1, f2, ..., fn
+      colunas_formantes <- paste0("f", 1:num_formantes)
+      
+      # Identificar colunas que não começam com "f"
+      colunas_preservadas <- names(df_filtrado)[!grepl("^f", names(df_filtrado))]
+      
+      # Combinar as colunas preservadas com as colunas formantes
+      colunas_selecionadas <- c(colunas_preservadas, colunas_formantes)
+      
+      # Filtrar o dataframe, mantendo apenas as colunas selecionadas que existem no dataframe
+      colunas_existentes <- colunas_selecionadas[colunas_selecionadas %in% names(df_filtrado)]
+      df_selecionado <- df_filtrado[, colunas_existentes]
+      
+      colunas_modelo <- c(colunas_formantes, "grupo", "vogal")
+      df_modelo <- df_selecionado[complete.cases(df_selecionado[, colunas_modelo]), ]
       
       permanova_resultado <- tryCatch({
         adonis2(
-          df_filtrado[, colunas_com_f] ~ grupo + vogal + grupo * vogal,
-          data = df_filtrado,
+          df_modelo[, colunas_formantes] ~ grupo + vogal + grupo * vogal,
+          data = df_modelo,
           method = "euclidean",
           by = "terms",
           parallel = parallel::detectCores() - 1,
@@ -294,25 +312,38 @@ server <- function(input, output, session) {
       
     })
     
-
-    
-    
-    
-    
-    
     output$permdisp <- renderPlot({
       req(resultados_processamento$status)
       
       df_filtrado$grupo <- as.factor(df_filtrado$grupo)
       df_filtrado$vogal <- as.factor(df_filtrado$vogal)
       
-      # Colunas acústicas
-      colunas_com_f <- names(df_filtrado)[startsWith(names(df_filtrado), "f")]
-      distancias <- dist(df_filtrado[, colunas_com_f], method = "euclidean")
+      # Filtrar os nomes das colunas que começam com "f"
+      num_formantes <- input$num_formantes  # Número de formantes selecionados pelo usuário
       
-      # Fator interação só para a análise (se quiser)
-      df_filtrado$grupo_vogais <- interaction(df_filtrado$grupo, df_filtrado$vogal, sep = " - ")
-      disp_interacao <- betadisper(distancias, df_filtrado$grupo_vogais)
+      # Criar uma sequência de nomes de colunas do tipo f1, f2, ..., fn
+      colunas_formantes <- paste0("f", 1:num_formantes)
+      
+      # Identificar colunas que não começam com "f"
+      colunas_preservadas <- names(df_filtrado)[!grepl("^f", names(df_filtrado))]
+      
+      # Combinar as colunas preservadas com as colunas formantes
+      colunas_selecionadas <- c(colunas_preservadas, colunas_formantes)
+      
+      # Filtrar o dataframe, mantendo apenas as colunas selecionadas que existem no dataframe
+      colunas_existentes <- colunas_selecionadas[colunas_selecionadas %in% names(df_filtrado)]
+      df_selecionado <- df_filtrado[, colunas_existentes]
+      
+      colunas_modelo <- c(colunas_formantes, "grupo", "vogal")
+      df_modelo <- df_selecionado[complete.cases(df_selecionado[, colunas_modelo]), ]
+      
+      # Colunas acústicas
+      colunas_com_f <- names(df_modelo)[startsWith(names(df_modelo), "f")]
+      distancias <- dist(df_modelo[, colunas_com_f], method = "euclidean")
+      
+      # Interação
+      df_modelo$grupo_vogais <- interaction(df_modelo$grupo, df_modelo$vogal, sep = " - ")
+      disp_interacao <- betadisper(distancias, df_modelo$grupo_vogais)
       
       grupos <- levels(disp_interacao$group)
       n_grupos <- length(grupos)
@@ -347,8 +378,6 @@ server <- function(input, output, session) {
         ncol = 2
       )
     })
-    
-    
     
     output$permdisp_res <- renderText({
       req(resultados_processamento$status)

@@ -1,5 +1,5 @@
 # Análise estatístisca de arquivos do Praat para comparação de locutor 
-# v. 0.03
+# v. 0.031
 # Autor: Carlo Ralph De Musis
 
 library(ARTool)
@@ -355,12 +355,12 @@ processar_formantes <- function(outliers, max_formantes, formantes, textgrid) {
   dados_formantes <- data.frame(tempo = formantes$t)
   
   # Adicionar colunas dinamicamente para cada formante disponível
-  for (i in 1:formantes$maxnFormants) {
+  for (i in 1:5) {
     col_name <- paste0("f", i)
     dados_formantes[[col_name]] <- formantes$frequencyArray[i, ]
   }
   
-  formantes_cols <- paste0("f", 1:max_formantes)
+  formantes_cols <- paste0("f", 1:5)
   dados_formantes[, formantes_cols] <- t(apply(dados_formantes[, formantes_cols], 1, function(x) {
     # Ordena os valores ignorando NAs
     sorted <- sort(x, na.last = TRUE)

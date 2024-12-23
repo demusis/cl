@@ -1,5 +1,5 @@
 # Análise estatístisca de arquivos do Praat para comparação de locutor 
-# v. 0.03
+# v. 0.031
 # Autor: Carlo Ralph De Musis
 
 ui <- fluidPage(
