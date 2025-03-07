@@ -1,11 +1,11 @@
 # Análise estatístisca de arquivos do Praat para comparação de locutor 
-# v. 0.031
+# v. 0.037
 # Autor: Carlo Ralph De Musis
 
 ui <- fluidPage(
   useShinyjs(),
   theme = theme,
-  titlePanel("Análise estatístisca de arquivos do Praat para comparação de locutor v. 0.03"),
+  titlePanel("Análise estatístisca de arquivos do Praat para comparação de locutor v. 0.037"),
   sidebarLayout(
     sidebarPanel(
       width = 3,

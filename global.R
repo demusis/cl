@@ -1,5 +1,5 @@
 # Análise estatístisca de arquivos do Praat para comparação de locutor 
-# v. 0.031
+# v. 0.037
 # Autor: Carlo Ralph De Musis
 
 library(ARTool)
@@ -39,7 +39,13 @@ options(mc_doScale_quiet = TRUE)
 # ----------------------------------------------------------------------------
 
 # Função para converter PitchTier em DataFrame e filtrar por presença ou ausência de um valor específico em uma tier
-pitchtier_dataframe <- function(textgrid, arquivo, origem, tier_nome, valor_tier = "", filtrar_presenca = FALSE, outlier = FALSE) {
+pitchtier_dataframe <- function(textgrid, 
+                                arquivo, 
+                                origem, 
+                                tier_nome, 
+                                valor_tier = "", 
+                                filtrar_presenca = FALSE, 
+                                outlier = FALSE) {
   # Ler o arquivo de PitchTier
   pitchTier <- pt.read(arquivo, encoding = "auto")
   
@@ -205,9 +211,37 @@ gerar_dataframe_textgrid <- function(textgrid) {
            '28' = 'Lambdacismo',
            '29' = 'Velarização Fricativa',
            '30' = 'Rótico em ataque inicial',
+             '30.1' = 'Rótico em ataque inicial - Fricativa glotal',
+             '30.2' = 'Rótico em ataque inicial - Fricativa velar',
+             '30.3' = 'Rótico em ataque inicial - Vibrante (trill)',
+             '30.4' = 'Rótico em ataque inicial - Vibrante uvular (trill uvular)',
+             '30.5' = 'Rótico em ataque inicial - Tepe',
+             '30.6' = 'Rótico em ataque inicial - Retroflexa',
+             '30.7' = 'Rótico em ataque inicial - Apagamento',
            '31' = 'Rótico em ataque medial',
+             '31.1' = 'Rótico em ataque medial - Fricativa glotal',
+             '31.2' = 'Rótico em ataque medial - Fricativa velar',
+             '31.3' = 'Rótico em ataque medial - Vibrante (trill)',
+             '31.4' = 'Rótico em ataque medial - Vibrante uvular (trill uvular)',
+             '31.5' = 'Rótico em ataque medial - Tepe',
+             '31.6' = 'Rótico em ataque medial - Retroflexa',
+             '31.7' = 'Rótico em ataque medial - Apagamento',
            '32' = 'Rótico em coda medial',
+             '32.1' = 'Rótico em coda medial - Fricativa glotal',
+             '32.2' = 'Rótico em coda medial - Fricativa velar',
+             '32.3' = 'Rótico em coda medial - Vibrante (trill)',
+             '32.4' = 'Rótico em coda medial - Vibrante uvular (trill uvular)',
+             '32.5' = 'Rótico em coda medial - Tepe',
+             '32.6' = 'Rótico em coda medial - Retroflexa',
+             '32.7' = 'Rótico em coda medial - Apagamento',
            '33' = 'Rótico em coda final',
+             '33.1' = 'Rótico em coda final - Fricativa glotal',
+             '33.2' = 'Rótico em coda final - Fricativa velar',
+             '33.3' = 'Rótico em coda final - Vibrante (trill)',
+             '33.4' = 'Rótico em coda final - Vibrante uvular (trill uvular)',
+             '33.5' = 'Rótico em coda final - Tepe',
+             '33.6' = 'Rótico em coda final - Retroflexa',
+             '33.7' = 'Rótico em coda final - Apagamento',
            '34' = 'Variação Livre',
            '35' = 'Comentário',
            anotacao
